@@ -113,7 +113,28 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    print(Q.shape)
+    #print(Q.mean(axis=0))
+    #print(Q.std(axis=0))
+    #print(Q.mean(axis=1))
+    #print(Q.std(axis=1))
+    print(K.shape)
+
+    #QNorm=Q-Q.mean()#axis=2)
+    #QNorm=QNorm/Q.std()#axis=2)
+    #KNorm=K-K.mean()#axis=2)
+    #KNorm=KNorm/K.std()#axis=2)
+     
+    QKTranspose=Q@torch.transpose(K,-2,-1)
+    dk=float(K.shape[-1]) 
+    QKTransposeScaled=QKTranspose/np.sqrt(dk)
+    if (mask != None): 
+        QKTransposeScaled += np.array(np.where(mask,0,-np.inf),dtype=np.float32)
+    SM=nn.Softmax(-1)#QKTransposeScaled)
+    SMResult=SM(QKTransposeScaled)
+    print(SMResult.shape)
+    return SMResult@V
+    #raise NotImplementedError
 
 
 def run_multihead_self_attention(
