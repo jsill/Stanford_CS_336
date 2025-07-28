@@ -230,7 +230,32 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    def ropeMat(m,d): 
+        thetas=[m*np.pow(theta,-2*(i-1)/float(d)) for i in range(1,int(d/2 + 1))]
+        cosines=torch.tensor(np.concatenate([[np.cos(tht),np.cos(tht)] for tht in thetas]))
+        sinesBelow=torch.tensor(np.concatenate([[np.sin(tht),0] for tht in thetas]))
+        sinesAbove=torch.tensor(np.concatenate([[-np.sin(tht),0] for tht in thetas]))
+        rMat=torch.zeros(d,d)
+        rMat=rMat.diagonal_scatter(cosines)
+        rMat=rMat.diagonal_scatter(sinesBelow[0:-1],-1)
+        rMat=rMat.diagonal_scatter(sinesAbove[0:-1],1)
+        return rMat
+
+    seqLength=token_positions.shape[-1]
+    #allRopeMat=torch.cat([ropeMat(token_positions[i],d_k) for i in range(seqLength)],-1)
+    allRopeMat=ropeMat(token_positions[0],d_k)
+    allRopeMat1=ropeMat(token_positions[1],d_k)
+    allRopeMat
+    print('ALL ROPE MAT SHAPE',allRopeMat.shape)
+    res=in_query_or_key@allRopeMat1
+    print('RES SHAPE',res.shape)
+    print('RES[0][1]',res[0][1])
+    print('IN QUERY SHAPE',in_query_or_key.shape)
+    print('TOKEN POSITIONS 0 is ',token_positions[0])
+    print('TOKEN POSITIONS 1 is ',token_positions[1])
+    print('token positions shape is ',token_positions.shape)
+    return res
+       
 
 
 def run_transformer_block(
@@ -408,8 +433,30 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
 
+    a=in_features
+    aSq=a.square()
+    dim=a.dim() 
+    aSqMean=torch.mean(aSq,dim-1)#,tuple(range(0,dim-1)))
+    
+    print('SHAPE')
+    print(aSqMean.shape)
+    print(a.shape)
+    print('WEIGHTS SHAPE')
+    print(weights.shape)
+    #aRMS=np.power(aSqMean,0.5)
+    
+    aRMS=aSqMean.sqrt()+ eps
+
+    #REVISIT...there is surely a better way than all this transposing
+    a=a.transpose(0,2)
+    a=a.transpose(1,2)
+    aDiv=a.div(aRMS)
+    aDiv=aDiv.transpose(1,2)
+    aDiv=aDiv.transpose(0,2)
+    return aDiv*weights
+    #raise NotImplementedError
+  
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
     """Given a tensor of inputs, return the output of applying SiLU
@@ -461,7 +508,13 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+
+    maxes=torch.max(in_features,dim)[0]
+    in_features=torch.transpose(torch.transpose(in_features,0,dim)-maxes,dim,0)
+    in_features_exp=torch.exp(in_features)
+    sm=torch.sum(in_features_exp,dim)
+    return torch.transpose(torch.div(torch.transpose(in_features_exp,0,dim),sm),dim,0)
+    
 
 
 def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]) -> Float[Tensor, ""]:
@@ -489,13 +542,31 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    
+    l2_norm=0
+    sumSq=0.
+    for p in parameters:
+        print(p.grad)
+        if (p.grad != None):
+            sq=p.grad*p.grad
+            sumSq=sumSq + sq.nansum()
+    l2_norm=np.sqrt(sumSq)
+
+    if (l2_norm > max_l2_norm):
+        scale=max_l2_norm/l2_norm
+        for p in parameters:
+            if (p.grad != None):
+                p.grad=scale*p.grad
+
 
 
 def get_adamw_cls() -> type[torch.optim.Optimizer]:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
+
+    #class AdamW(torch.optim.Optimizer):
+        
     raise NotImplementedError
 
 
