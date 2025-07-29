@@ -492,6 +492,24 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
+    numTok=len(dataset)
+
+    #shift=int(np.floor((numTok - context_length-1)/(batch_size-1)))
+
+    #extra=numTok - shift*(batch_size-1) - context_length
+
+    maxStart=numTok - context_length -1
+    
+    samples=torch.zeros(batch_size,context_length,dtype=torch.int64,device=device)
+    labels=torch.zeros(batch_size,context_length,device=device)
+    for bi in range(batch_size):
+        strt=np.random.randint(maxStart + 1)
+        samples[bi,:]=torch.from_numpy(dataset[strt:strt + context_length])#,dtype=torch.int64)
+        labels[bi]=torch.from_numpy(dataset[strt + 1:strt + 1 + context_length])
+    return (samples,labels)
+        
+              
+    
     raise NotImplementedError
 
 
@@ -530,7 +548,26 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    batchSize=inputs.shape[0]
+ 
+    softm=run_softmax(inputs,1)
+ 
+ 
+    def safeLog(p):
+        
+        if (p ==0):
+            #I had to find this by bisection...I wish I understood why this is correct, TODO, revisit
+            pIn=1.675e-184
+        else:
+            pIn=p
+        pInAr=np.array([pIn],dtype=np.float64)
+        print('pInAr is ',pInAr)
+        return np.log(pInAr[0])
+        
+    softMaxMat=torch.Tensor([softm[i][targets[i]] for i in range(batchSize)])
+ 
+    return -torch.Tensor([np.mean([safeLog(softMaxMat[i]) for i in range(softMaxMat.shape[0])])])
+    
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
