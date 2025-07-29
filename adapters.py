@@ -469,7 +469,11 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+
+    def sigmoid(x):
+        return 1./(1. + torch.exp(-x))
+    return in_features*sigmoid(in_features)
+
 
 
 def run_get_batch(
@@ -632,7 +636,18 @@ def run_get_lr_cosine_schedule(
     Returns:
         Learning rate at the given iteration under the specified schedule.
     """
-    raise NotImplementedError
+
+    warmupStep=max_learning_rate/warmup_iters
+    total_iters=cosine_cycle_iters
+    #print('it, total_iters',it,total_iters)
+    if (it <= warmup_iters):
+        return it*warmupStep
+    elif (it > total_iters):
+        return min_learning_rate
+    
+    return min_learning_rate + 0.5*(max_learning_rate-min_learning_rate)*( 1+ np.cos(np.pi*(it - warmup_iters)/(cosine_cycle_iters-warmup_iters)))
+    
+    #raise NotImplementedError
 
 
 def run_save_checkpoint(
