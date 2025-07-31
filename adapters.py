@@ -113,12 +113,12 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    print(Q.shape)
+    #print(Q.shape)
     #print(Q.mean(axis=0))
     #print(Q.std(axis=0))
     #print(Q.mean(axis=1))
     #print(Q.std(axis=1))
-    print(K.shape)
+    #print(K.shape)
 
     #QNorm=Q-Q.mean()#axis=2)
     #QNorm=QNorm/Q.std()#axis=2)
@@ -132,7 +132,7 @@ def run_scaled_dot_product_attention(
         QKTransposeScaled += np.array(np.where(mask,0,-np.inf),dtype=np.float32)
     SM=nn.Softmax(-1)#QKTransposeScaled)
     SMResult=SM(QKTransposeScaled)
-    print(SMResult.shape)
+    #print(SMResult.shape)
     return SMResult@V
     #raise NotImplementedError
 
@@ -666,7 +666,16 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
+    rNum=numpy.random.randint(1000000)
+    fName='model_optim_%d'%rNum
+
+    
+    mod=pickle.dumps(model.state_dict())
+    opt=pickle.dumps(optimizer.state_dict())
+    import pickle
+    pickle.dump((mod,opt,iteration),open(fName,'wb'))
+    return fName
+
 
 
 def run_load_checkpoint(
@@ -687,7 +696,11 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    mod_state_dict,opt_state_dict,iterNum=pickle.load(open(src,'rb'))
+    model.load_state_dict(mod_state_dict)
+    optimizer.load_state_dict(opt_state_dict)
+    
+    #raise NotImplementedError
 
 
 def get_tokenizer(
@@ -740,4 +753,129 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+
+    
+    
+    vocab={x:bytes([x]) for x in range(256)}
+    
+    currVocabSize=len(vocab)
+    for sTok in special_tokens:
+        vocab[currVocabSize]=bytes(sTok.encode('utf-8'))
+        currVocabSize=currVocabSize + 1
+
+
+    def getSpecialTokenLocs(sTok,lne):
+        locs=[]
+        strt=0
+        sTokLen=len(sTok)
+        while (True):
+            loc=lne[strt:].find(sTok)
+            if (loc==-1):
+                return locs
+            else:
+                locs.append(loc)
+                strt=strt + loc+sTokLen
+
+    def getAllSpecialTokenLocs(lne):
+        dct=dict()
+        for sTok in special_tokens:
+            sTokLen=len(sTok)
+            locs=getSpecialTokenLocs(sTok,lne)
+            if (len(locs) > 0):
+                dct[sTok]=[(l,l+sTokLen) for l in locs]
+        #reverseDct=dict() 
+        allSpecialTokenRanges=[]
+        for sTok in dct:
+            allSpecialTokenRanges=allSpecialTokenRanges + dct[sTok]
+        return sorted(allSpecialTokenRanges,key=lambda x: x[0])
+            
+    inF=open(input_path,'r')
+    line=inF.readline().strip()
+    
+    def getInitIndicesForNonSpecial(nonSpecialStr):
+        return list(map(int,nonSpecialStr.encode('utf-8')))
+
+    nonSpecialIndicesList=[]
+    while (line != ''):
+        allSpecialTokenRanges=getAllSpecialTokenLocs(line)
+        #print('ALL RANGES',allSpecialTokenRanges)
+        if (len(allSpecialTokenRanges)==0):
+            nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line))
+        else:
+            for rngIdx in range(len(allSpecialTokenRanges)):
+                rnge=allSpecialTokenRanges[rngIdx]
+                nonSpecialEnd=rnge[0]
+                if (rngIdx==0):
+                    nonSpecialStart=0
+                else:
+                    nonSpecialStart=allSpecialTokenRanges[rngIdx-1][1]
+                #print('line type',type(line))
+                #print('line len',len(line))
+                if (nonSpecialEnd > nonSpecialStart):
+                    nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line[nonSpecialStart:nonSpecialEnd]))
+        line=inF.readline()
+    inF.close()
+
+    numMerges=vocab_size - currVocabSize
+ 
+    merges=[]
+    print('starting merges')
+    print('num chunks',len(nonSpecialIndicesList))
+
+    numNonSpecial=len(nonSpecialIndicesList)
+    numNonSpecialRange=range(numNonSpecial)
+    
+    for mIdx in range(numMerges):
+        #print('mIdx ', mIdx)
+        locDct=dict()
+        for indicesIdx in numNonSpecialRange:
+            indices=nonSpecialIndicesList[indicesIdx]
+            indicesZipped=zip(indices[0:-1],indices[1:])
+            pairIdx=0
+            for pair in indicesZipped:
+                locDct[(indicesIdx,pair)]=locDct.get((indicesIdx,pair),[]) + [pairIdx]
+                pairIdx =pairIdx + 1
+        #print('locDct',locDct)
+
+        #print('a')
+        cntDct=dict()
+        for ky in locDct:
+            i,pair=ky
+            cntDct[pair]=cntDct.get(pair,0) + len(locDct[ky])
+
+        topPair=max(cntDct,key=cntDct.get)
+        #print('b')
+        b1=vocab[topPair[0]]
+        b2=vocab[topPair[1]]
+        vocab[currVocabSize]=b1 + b2
+        newTok=currVocabSize
+        #print('merging ', (b1,b2))
+        #print('count is ',cntDct[(topPair[0],topPair[1])])
+        merges.append((b1,b2))
+        currVocabSize=currVocabSize + 1
+        newNonSpecialIndicesList=[]
+        for indicesIdx in range(len(nonSpecialIndicesList)):
+            indices=nonSpecialIndicesList[indicesIdx]
+            locs=locDct.get((indicesIdx,topPair),[])
+            if (len(locs)==0):
+                newNonSpecialIndicesList.append(indices)
+            else:
+                newIndices=[]
+                for locIdx in range(len(locs)):
+                    loc=locs[locIdx]
+                    if (locIdx==0):
+                        newIndices=newIndices + indices[0:loc] + [newTok]
+                    else:
+                        newIndices=newIndices + indices[locs[locIdx-1]+2:loc] + [newTok]
+                if (locs[-1] < len(indices) -2): 
+                    newIndices=newIndices + indices[locs[-1] + 2:]
+                newNonSpecialIndicesList.append(newIndices)
+        #print('---------------done loop-----------\n\n')
+        nonSpecialIndicesList=newNonSpecialIndicesList
+            #for i in range(indicesLen-1):
+                
+
+    print('*********** currVocabSize is',currVocabSize)
+    print('vocab_size is ', vocab_size)
+    return vocab,merges 
+    
