@@ -726,6 +726,17 @@ def get_tokenizer(
     raise NotImplementedError
 
 
+class Node:
+
+    def __init__(self,data,
+                 nextNode=None,
+                 prevNode=None):
+        self.data=data
+        self.nextNode=nextNode
+        self.prevNode=prevNode
+
+
+    
 def run_train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
@@ -793,8 +804,18 @@ def run_train_bpe(
     line=inF.readline().strip()
     
     def getInitIndicesForNonSpecial(nonSpecialStr):
-        return list(map(int,nonSpecialStr.encode('utf-8')))
-
+        lst=list(map(int,nonSpecialStr.encode('utf-8')))
+        if (len(lst)==0):
+            return None
+        lenLstMinus1=len(lst)-1
+        prevNode=None 
+        for lIndx in range(lenLstMinus1,-1,-1):
+            node=Node(lst[lIndx],nextNode=prevNode)
+            if (prevNode != None):
+                prevNode.prevNode=node
+            prevNode=node
+        return node
+    
     nonSpecialIndicesList=[]
     while (line != ''):
         allSpecialTokenRanges=getAllSpecialTokenLocs(line)
@@ -818,64 +839,90 @@ def run_train_bpe(
 
     numMerges=vocab_size - currVocabSize
  
-    merges=[]
+    merges=[None]*numMerges
     print('starting merges')
     print('num chunks',len(nonSpecialIndicesList))
 
+    if (len(nonSpecialIndicesList) > 2000):
+        raise Exception('NOO')
+     
     numNonSpecial=len(nonSpecialIndicesList)
     numNonSpecialRange=range(numNonSpecial)
     
-    for mIdx in range(numMerges):
+
         #print('mIdx ', mIdx)
-        locDct=dict()
-        for indicesIdx in numNonSpecialRange:
-            indices=nonSpecialIndicesList[indicesIdx]
-            indicesZipped=zip(indices[0:-1],indices[1:])
-            pairIdx=0
-            for pair in indicesZipped:
-                locDct[(indicesIdx,pair)]=locDct.get((indicesIdx,pair),[]) + [pairIdx]
-                pairIdx =pairIdx + 1
-        #print('locDct',locDct)
+    locDct=dict()
+    for indicesIdx in numNonSpecialRange:
+        indicesHeadNode=nonSpecialIndicesList[indicesIdx]
+        
+        indicesCurrNode=indicesHeadNode
+        while (indicesCurrNode.nextNode != None):
+            pair=(indicesCurrNode.data,indicesCurrNode.nextNode.data)
+            locDct[(indicesIdx,pair)]=locDct.get((indicesIdx,pair),[])  + [indicesCurrNode]
+            indicesCurrNode=indicesCurrNode.nextNode
 
-        #print('a')
-        cntDct=dict()
-        for ky in locDct:
-            i,pair=ky
-            cntDct[pair]=cntDct.get(pair,0) + len(locDct[ky])
+    cntDct=dict()
 
-        topPair=max(cntDct,key=cntDct.get)
-        #print('b')
-        b1=vocab[topPair[0]]
-        b2=vocab[topPair[1]]
-        vocab[currVocabSize]=b1 + b2
-        newTok=currVocabSize
-        #print('merging ', (b1,b2))
-        #print('count is ',cntDct[(topPair[0],topPair[1])])
-        merges.append((b1,b2))
-        currVocabSize=currVocabSize + 1
-        newNonSpecialIndicesList=[]
-        for indicesIdx in range(len(nonSpecialIndicesList)):
-            indices=nonSpecialIndicesList[indicesIdx]
-            locs=locDct.get((indicesIdx,topPair),[])
-            if (len(locs)==0):
-                newNonSpecialIndicesList.append(indices)
-            else:
-                newIndices=[]
-                for locIdx in range(len(locs)):
-                    loc=locs[locIdx]
-                    if (locIdx==0):
-                        newIndices=newIndices + indices[0:loc] + [newTok]
-                    else:
-                        newIndices=newIndices + indices[locs[locIdx-1]+2:loc] + [newTok]
-                if (locs[-1] < len(indices) -2): 
-                    newIndices=newIndices + indices[locs[-1] + 2:]
-                newNonSpecialIndicesList.append(newIndices)
-        #print('---------------done loop-----------\n\n')
-        nonSpecialIndicesList=newNonSpecialIndicesList
-            #for i in range(indicesLen-1):
-                
+    for ky in locDct:
+        i,pair=ky
+        cntDct[pair]=cntDct.get(pair,0) + len(locDct[ky])
 
-    print('*********** currVocabSize is',currVocabSize)
-    print('vocab_size is ', vocab_size)
-    return vocab,merges 
+    cntTuples=[(p,cntDct[p]) for p in cntDct]
+    cntTuples=sorted(cntTuples,key=lambda x: x[1],reverse=True)
     
+    
+
+    MINUS_LARGE=-100000
+    for mIdx in range(numMerges):
+       topPair=cntTuples[0][0]#max(cntDct,key=cntDct.get)
+       cntTuples=cntTuples[1:]#del cntDct[topPair]
+       #cntDct[topPair]=MINUS_LARGE
+       b1=vocab[topPair[0]]
+       b2=vocab[topPair[1]]
+       newTok=currVocabSize
+       vocab[newTok]=b1 + b2
+       
+       merges[mIdx]=(b1,b2)
+       currVocabSize=currVocabSize + 1
+       
+       if (currVocabSize==264):
+           print('---?YESSSS')
+           print('b1 + b2',b1 + b2)
+           print('locNodes',locNodes)
+       newCntDct=dict()
+       
+       for indicesIdx in range(len(nonSpecialIndicesList)):
+           indices=nonSpecialIndicesList[indicesIdx]
+           locNodes=locDct.get((indicesIdx,topPair),[])
+           if (len(locNodes) !=0):
+               for node in locNodes:
+                   node.data=newTok
+                   if (node.nextNode !=None):
+                       node.nextNode=node.nextNode.nextNode
+                       if (node.nextNode != None):
+                           newPairNext=(node.data,node.nextNode.data)
+                           newCntDct[newPairNext]=newCntDct.get(newPairNext,0) + 1
+                           locDct[(indicesIdx,newPairNext)]=locDct.get((indicesIdx,newPairNext),[]) + [node]
+                   if (node.prevNode != None):
+                       newPairPrev=(node.prevNode.data,node.data)
+                       newCntDct[newPairPrev]=newCntDct.get(newPairPrev,0) + 1
+                       locDct[(indicesIdx,newPairPrev)]=locDct.get((indicesIdx,newPairPrev),[]) + [node.prevNode]
+                       
+       for newKy in newCntDct:
+           newCntTuple=(newKy,newCntDct[newKy])
+           i=0
+           numTup=len(cntTuples)
+           while ( ( i < numTup) and (cntTuples[i][1] > newCntTuple[1]) ):
+               i=i + 1
+           if (i==len(cntTuples)):
+               cntTuples=cntTuples + [newCntTuple]
+           else:
+               cntTuples=cntTuples[0:i] + [newCntTuple] + cntTuples[i:]
+                
+           
+    #print('*********** currVocabSize is',currVocabSize)
+    #print('vocab_size is ', vocab_size)
+    #print('cntDct is',cntDct)
+    return vocab,merges  
+    
+ 
