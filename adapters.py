@@ -620,6 +620,24 @@ class AdaGrad(torch.optim.Optimizer):
                 state['g2']=g2
                 p.data -= lr*grad/torch.sqrt(g2 + 1e-5)
 
+
+class MySGD(torch.optim.Optimizer):
+    def __init__(self,params,lr,weight_decay=0.):
+        super(MySGD,self).__init__(params,dict(lr=lr,
+                                               weight_decay=weight_decay))
+
+    def step(self):
+        print('USING MY OWN')
+        for group in self.param_groups:
+            lr=group['lr']
+            lambd=group['weight_decay']
+            print('lambd is',lambd)
+            for p in group['params']:
+
+                grad=p.grad.data
+
+                p.data=p.data - lr*(grad +lambd*p.data)
+
                 
 class AdamW(torch.optim.Optimizer):
     def __init__(self,params,lr,weight_decay,betas,eps):
@@ -642,10 +660,11 @@ class AdamW(torch.optim.Optimizer):
                 
                 grad=p.grad.data
 
-                g=grad + lambd*p.data
+                g=grad #+ lambd*p.data
 
                 mom=state.get('mom',torch.zeros_like(grad))
 
+                #print('mom[0] is ',mom[0])
                 mom=beta1*mom + (1-beta1)*g
 
                 state['mom']=mom
@@ -664,11 +683,14 @@ class AdamW(torch.optim.Optimizer):
                 vhat=v/(1 - np.power(beta2,step_count))
                 state['step_count']=step_count + 1
                 
-                state['grad2']=g2
                 eta=1.
-                p.data = p.data - eta*(lr*momhat/(torch.sqrt(vhat) + eps) + lambd*p.data)
+                p.data = p.data - eta*(lr*(momhat/(torch.sqrt(vhat) + eps) + lambd*p.data ))
  
-                
+
+def get_my_cls() -> type[torch.optim.Optimizer]:
+    return MySGD
+
+
 def get_adamw_cls() -> type[torch.optim.Optimizer]:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
