@@ -11,6 +11,7 @@ from torch import Tensor
 
 import numpy as np
 from torch import nn
+import time
 
 def run_linear(
     d_in: int,
@@ -601,14 +602,81 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
 
 
+class AdaGrad(torch.optim.Optimizer):
+    def __init__(self,params,lr):
+        super(AdaGrad,self).__init__(params,dict(lr=lr))
+
+    def step(self):
+        for group in self.param_groups:
+            lr=group['lr']
+            for p in group['params']:
+
+                state=self.state[p]
+                grad=p.grad.data
+
+                g2=state.get('g2',torch.zeros_like(grad))
+
+                g2 += torch.square(grad)
+                state['g2']=g2
+                p.data -= lr*grad/torch.sqrt(g2 + 1e-5)
+
+                
+class AdamW(torch.optim.Optimizer):
+    def __init__(self,params,lr,weight_decay,betas,eps):
+        super(AdamW,self).__init__(params,dict(lr=lr,weight_decay=weight_decay,betas=betas,eps=eps))
+
+    def step(self):
+        for group in self.param_groups:
+            lr=group['lr']
+            lambd=group['weight_decay']
+            betas=group['betas']
+            beta1=betas[0]
+            beta2=betas[1]
+            eps=group['eps']
+            
+            for p in group['params']:
+
+                state=self.state[p]
+
+                step_count=state.get('step_count',1)
+                
+                grad=p.grad.data
+
+                g=grad + lambd*p.data
+
+                mom=state.get('mom',torch.zeros_like(grad))
+
+                mom=beta1*mom + (1-beta1)*g
+
+                state['mom']=mom
+                v=state.get('v',torch.zeros_like(grad))
+
+                
+                #grad2=state.get('grad2',torch.zeros_like(grad))
+                #grad2 += torch.square(grad)
+
+                g2=torch.square(g)
+                v=beta2*v + (1-beta2)*g2
+
+                state['v']=v
+                
+                momhat=mom/(1-np.power(beta1,step_count))
+                vhat=v/(1 - np.power(beta2,step_count))
+                state['step_count']=step_count + 1
+                
+                state['grad2']=g2
+                eta=1.
+                p.data = p.data - eta*(lr*momhat/(torch.sqrt(vhat) + eps) + lambd*p.data)
+ 
+                
 def get_adamw_cls() -> type[torch.optim.Optimizer]:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
 
-    #class AdamW(torch.optim.Optimizer):
+    return AdamW
         
-    raise NotImplementedError
+    #raise NotImplementedError
 
 
 def run_get_lr_cosine_schedule(
@@ -766,7 +834,8 @@ def run_train_bpe(
     """
 
     
-    
+    print('special tokens are',special_tokens)
+    print('vocab_size is ',vocab_size)
     vocab={x:bytes([x]) for x in range(256)}
     
     currVocabSize=len(vocab)
@@ -784,14 +853,16 @@ def run_train_bpe(
             if (loc==-1):
                 return locs
             else:
-                locs.append(loc)
-                strt=strt + loc+sTokLen
+                locs.append(strt + loc)
+                strt=strt + loc + sTokLen
 
     def getAllSpecialTokenLocs(lne):
         dct=dict()
         for sTok in special_tokens:
             sTokLen=len(sTok)
             locs=getSpecialTokenLocs(sTok,lne)
+            #print('sTok',sTok)
+            #print('locs',locs)
             if (len(locs) > 0):
                 dct[sTok]=[(l,l+sTokLen) for l in locs]
         #reverseDct=dict() 
@@ -799,9 +870,15 @@ def run_train_bpe(
         for sTok in dct:
             allSpecialTokenRanges=allSpecialTokenRanges + dct[sTok]
         return sorted(allSpecialTokenRanges,key=lambda x: x[0])
-            
+
+
+    content=open(input_path,'r').read()
+
+    print('eSpaceCount',len(content.split('e ')))
+    print('spaceTCount',len(content.split(' t')))
+    
     inF=open(input_path,'r')
-    line=inF.readline().strip()
+    line=inF.readline()
     
     def getInitIndicesForNonSpecial(nonSpecialStr):
         lst=list(map(int,nonSpecialStr.encode('utf-8')))
@@ -817,7 +894,10 @@ def run_train_bpe(
         return node
     
     nonSpecialIndicesList=[]
+    #lineCount=0
+    totalLen=0
     while (line != ''):
+        totalLen=totalLen + len(line)
         allSpecialTokenRanges=getAllSpecialTokenLocs(line)
         #print('ALL RANGES',allSpecialTokenRanges)
         if (len(allSpecialTokenRanges)==0):
@@ -835,8 +915,11 @@ def run_train_bpe(
                 if (nonSpecialEnd > nonSpecialStart):
                     nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line[nonSpecialStart:nonSpecialEnd]))
         line=inF.readline()
+        #lineCount=lineCount + 1
     inF.close()
 
+    #print('totalLen',totalLen)
+    #print('lineCount',lineCount)
     numMerges=vocab_size - currVocabSize
  
     merges=[None]*numMerges
@@ -869,60 +952,113 @@ def run_train_bpe(
 
     cntTuples=[(p,cntDct[p]) for p in cntDct]
     cntTuples=sorted(cntTuples,key=lambda x: x[1],reverse=True)
-    
+
+    def show(x):
+        pair,cnt=x
+        print((vocab[pair[0]],vocab[pair[1]],cnt))
+    print('cntTuples',[show(c) for c in cntTuples[0:10]])
     
 
     MINUS_LARGE=-100000
+
+    for n in nonSpecialIndicesList:
+        #print('-----------SECTION')
+        anStr=''
+        
+        while (n != None):
+            anStr=anStr + str(vocab[n.data])
+            n=n.nextNode
+        #print(anStr)
+        #print('---------')
+
+        
     for mIdx in range(numMerges):
-       topPair=cntTuples[0][0]#max(cntDct,key=cntDct.get)
-       cntTuples=cntTuples[1:]#del cntDct[topPair]
-       #cntDct[topPair]=MINUS_LARGE
+       #print('MERGE START')
+       #print('cntDct iv is ',cntDct.get((105,118),0))
+       #print('just checking:',vocab[105] + vocab[118])
+       #topPair=cntTuples[0][0]
+       topPair=max(cntDct,key=cntDct.get)
+       if (cntDct[topPair]==0):
+           continue
+       #cntTuples=cntTuples[1:]#del cntDct[topPair]
+       del cntDct[topPair]#=MINUS_LARGE
        b1=vocab[topPair[0]]
        b2=vocab[topPair[1]]
        newTok=currVocabSize
        vocab[newTok]=b1 + b2
-       
+ 
+       #print('------ added %s -----'%(b1+b2))
        merges[mIdx]=(b1,b2)
        currVocabSize=currVocabSize + 1
-       
-       if (currVocabSize==264):
-           print('---?YESSSS')
-           print('b1 + b2',b1 + b2)
-           print('locNodes',locNodes)
-       newCntDct=dict()
-       
+              
        for indicesIdx in range(len(nonSpecialIndicesList)):
            indices=nonSpecialIndicesList[indicesIdx]
            locNodes=locDct.get((indicesIdx,topPair),[])
            if (len(locNodes) !=0):
                for node in locNodes:
+
                    node.data=newTok
+
+                   #if (newTok==256):
+                   #    print('tok 256',b1 + b2)
                    if (node.nextNode !=None):
                        node.nextNode=node.nextNode.nextNode
+                                              
+                       #if (newTok==256):
+                       #    print('new nextnode data',node.nextNode.data,vocab[node.nextNode.data])
+
                        if (node.nextNode != None):
+                           node.nextNode.prevNode=node
+                           beforePairNext=(topPair[1],node.nextNode.data)
+
+                           #if (not (beforePairNext in cntDct)):
+                           #    print('!!!! ' + str(beforePairNext) + ' is not in cntDct')
+
+                           #print('beforePairNext decrementing ',vocab[beforePairNext[0]],vocab[beforePairNext[1]])
+                           cntDct[beforePairNext]=cntDct.get(beforePairNext,0) - 1
+                           
                            newPairNext=(node.data,node.nextNode.data)
-                           newCntDct[newPairNext]=newCntDct.get(newPairNext,0) + 1
+
+                           #if (newTok==256):
+                           #    print('newPairNext: ',newPairNext)
+
+                           cntDct[newPairNext]=cntDct.get(newPairNext,0) + 1
                            locDct[(indicesIdx,newPairNext)]=locDct.get((indicesIdx,newPairNext),[]) + [node]
                    if (node.prevNode != None):
-                       newPairPrev=(node.prevNode.data,node.data)
-                       newCntDct[newPairPrev]=newCntDct.get(newPairPrev,0) + 1
-                       locDct[(indicesIdx,newPairPrev)]=locDct.get((indicesIdx,newPairPrev),[]) + [node.prevNode]
+                       beforePairPrev=(node.prevNode.data,topPair[0])
+
+                       #if (not (beforePairPrev in cntDct)):
+                       #    print('!!!! ' + str(beforePairPrev) + ' is not in cntDct')
+                       #print('beforePairPrev decrementing ',vocab[beforePairPrev[0]],vocab[beforePairPrev[1]])
                        
-       for newKy in newCntDct:
-           newCntTuple=(newKy,newCntDct[newKy])
-           i=0
-           numTup=len(cntTuples)
-           while ( ( i < numTup) and (cntTuples[i][1] > newCntTuple[1]) ):
-               i=i + 1
-           if (i==len(cntTuples)):
-               cntTuples=cntTuples + [newCntTuple]
-           else:
-               cntTuples=cntTuples[0:i] + [newCntTuple] + cntTuples[i:]
-                
+                       cntDct[beforePairPrev]=cntDct.get(beforePairPrev,0) - 1
+ 
+                       newPairPrev=(node.prevNode.data,node.data)
+
+                       #if (newTok==256):
+                       #print('newPairPrev: ',newPairPrev)
+
+                       cntDct[newPairPrev]=cntDct.get(newPairPrev,0) + 1
+                       locDct[(indicesIdx,newPairPrev)]=locDct.get((indicesIdx,newPairPrev),[]) + [node.prevNode]
+                        
+       #for newKy in newCntDct:
+       #    newCntTuple=(newKy,newCntDct[newKy])
+       #    i=0
+       #    numTup=len(cntTuples)
+       #    while ( ( i < numTup) and (cntTuples[i][1] > newCntTuple[1]) ):
+       #        i=i + 1
+       #    if (i==len(cntTuples)):
+       #        cntTuples=cntTuples + [newCntTuple]
+       #    else:
+       #        cntTuples=cntTuples[0:i] + [newCntTuple] + cntTuples[i:]
+                 
            
     #print('*********** currVocabSize is',currVocabSize)
     #print('vocab_size is ', vocab_size)
     #print('cntDct is',cntDct)
+    #time.sleep(0.05)
+    print('first merge is ', merges[0])
+    print('first 10 are ', merges[0:10])
     return vocab,merges  
     
  
