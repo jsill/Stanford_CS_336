@@ -12,6 +12,7 @@ from torch import Tensor
 import numpy as np
 from torch import nn
 import time
+#import pickle
 
 def run_linear(
     d_in: int,
@@ -756,13 +757,13 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    rNum=numpy.random.randint(1000000)
+    rNum=np.random.randint(1000000)
     fName='model_optim_%d'%rNum
 
     
     mod=pickle.dumps(model.state_dict())
     opt=pickle.dumps(optimizer.state_dict())
-    import pickle
+    
     pickle.dump((mod,opt,iteration),open(fName,'wb'))
     return fName
 
@@ -787,11 +788,63 @@ def run_load_checkpoint(
         int: the previously-serialized number of iterations.
     """
     mod_state_dict,opt_state_dict,iterNum=pickle.load(open(src,'rb'))
-    model.load_state_dict(mod_state_dict)
+    model.load_state_dict(mod_state_dict) 
     optimizer.load_state_dict(opt_state_dict)
     
     #raise NotImplementedError
 
+class Tokenizer:
+
+    def __init__(self,vocab,merges,special_tokens):
+        self.vocab=vocab
+        self.merges=merges
+        self.special_tokens=special_tokens
+
+        self.maxByteLen=max([len(val) for val in self.vocab.values()])
+
+        toks=[ky for ky in self.vocab]
+        self.bytesToTok=dict(zip([self.vocab[t] for t in toks],toks))
+
+    def encode(self,textString):
+        textBytes=textString.encode('utf-8')
+        strLenInBytes=len(textString)
+        idx=0
+
+        encoding=[]
+        while (idx < strLenInBytes):
+            byteLen=self.maxByteLen
+            tok=None
+            while ((tok==None) and (byteLen > 0) ):
+                byteChunk=textBytes[idx:idx + byteLen]
+                if (byteChunk==b"a"):
+                    print('HERE',str(byteChunk))
+                tok=self.bytesToTok.get(byteChunk,None)
+                if (tok==None):
+                    byteLen=byteLen -1
+            if (tok==None):
+                raise Exception('no token found for any substring of ',textBytes[idx:idx + self.maxByteLen])
+            encoding.append(tok)
+            idx=idx + byteLen
+        return encoding
+
+    def decode(self,tokenList):
+        numTok=len(tokenList)
+        print('1/5')
+        return ''.join([self.vocab[t].decode('utf-8',errors='ignore') for t in tokenList[0:numTok]])
+        #print('2/5')
+        #print(''.join([self.vocab[t].decode('utf-8') for t in tokenList[0:int(2.*numTok/5.)]]))
+        #print('3/5')
+        #print(''.join([self.vocab[t].decode('utf-8') for t in tokenList[0:int(3.*numTok/5.)]]))
+        #print('4/5')
+        #print(''.join([self.vocab[t].decode('utf-8') for t in tokenList[0:int(4.*numTok/5.)]]))
+        #print('1/5')
+        #print ''.join([self.vocab[t].decode('utf-8') for t in tokenList[0:int(numTok/5.)]])
+        
+    
+                
+        
+            
+    
 
 def get_tokenizer(
     vocab: dict[int, bytes],
@@ -813,7 +866,9 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+
+    return Tokenizer(vocab,merges,special_tokens)
+    #raise NotImplementedError
 
 
 class Node:
