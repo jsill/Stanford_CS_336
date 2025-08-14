@@ -441,11 +441,7 @@ def run_rmsnorm(
     dim=a.dim() 
     aSqMean=torch.mean(aSq,dim-1)#,tuple(range(0,dim-1)))
     
-    print('SHAPE')
-    print(aSqMean.shape)
-    print(a.shape)
-    print('WEIGHTS SHAPE')
-    print(weights.shape)
+    
     #aRMS=np.power(aSqMean,0.5)
     
     aRMS=aSqMean.sqrt()+ eps
@@ -567,7 +563,7 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
         else:
             pIn=p
         pInAr=np.array([pIn],dtype=np.float64)
-        print('pInAr is ',pInAr)
+        #print('pInAr is ',pInAr)
         return np.log(pInAr[0])
         
     softMaxMat=torch.Tensor([softm[i][targets[i]] for i in range(batchSize)])
@@ -589,7 +585,7 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
     l2_norm=0
     sumSq=0.
     for p in parameters:
-        print(p.grad)
+        #print(p.grad)
         if (p.grad != None):
             sq=p.grad*p.grad
             sumSq=sumSq + sq.nansum()
@@ -628,11 +624,11 @@ class MySGD(torch.optim.Optimizer):
                                                weight_decay=weight_decay))
 
     def step(self):
-        print('USING MY OWN')
+        #print('USING MY OWN')
         for group in self.param_groups:
             lr=group['lr']
             lambd=group['weight_decay']
-            print('lambd is',lambd)
+            #print('lambd is',lambd)
             for p in group['params']:
 
                 grad=p.grad.data
@@ -806,31 +802,143 @@ class Tokenizer:
         self.bytesToTok=dict(zip([self.vocab[t] for t in toks],toks))
 
     def encode(self,textString):
-        textBytes=textString.encode('utf-8')
-        strLenInBytes=len(textString)
-        idx=0
+
+        print('testString is',textString)
+        print('special tokens are',self.special_tokens)
+        specialTokenRanges=getAllSpecialTokenLocs(textString,self.special_tokens)
+
+        
+        def encodeNonSpecial(nonSpecialTextString):
+            textBytes=nonSpecialTextString.encode('utf-8')
+            strLenInBytes=len(textBytes)
+            idx=0
+
+            encodingForChunk=[]
+            while (idx < strLenInBytes):
+                byteLen=self.maxByteLen
+                tok=None
+                while ((tok==None) and (byteLen > 0) ):
+                    byteChunk=textBytes[idx:idx + byteLen]
+               
+                    tok=self.bytesToTok.get(byteChunk,None)
+                    if (tok==None):
+                        byteLen=byteLen -1
+                if (tok==None):
+                    raise Exception('no token found for any substring of ',textBytes[idx:idx + self.maxByteLen])
+                encodingForChunk.append(tok)
+                idx=idx + byteLen
+            return encodingForChunk
 
         encoding=[]
-        while (idx < strLenInBytes):
-            byteLen=self.maxByteLen
-            tok=None
-            while ((tok==None) and (byteLen > 0) ):
-                byteChunk=textBytes[idx:idx + byteLen]
-                if (byteChunk==b"a"):
-                    print('HERE',str(byteChunk))
-                tok=self.bytesToTok.get(byteChunk,None)
-                if (tok==None):
-                    byteLen=byteLen -1
-            if (tok==None):
-                raise Exception('no token found for any substring of ',textBytes[idx:idx + self.maxByteLen])
-            encoding.append(tok)
-            idx=idx + byteLen
-        return encoding
 
+        def findWhichSpecialToken(txtString):
+            txtBytes=txtString.encode('utf-8')
+            return self.bytesToTok[txtBytes]
+
+        if (specialTokenRanges==[]):
+            return encodeNonSpecial(textString)
+
+        #prevSpecialTokenEnd=None
+        for rngIdx in range(len(specialTokenRanges)):
+            rnge=specialTokenRanges[rngIdx]
+            #this is the non-special text chunk *preceding* the special token
+            nonSpecialEnd=rnge[0]
+            if (rngIdx==0):
+                nonSpecialStart=0
+            else:
+                nonSpecialStart=specialTokenRanges[rngIdx-1][1]
+                
+
+            if (nonSpecialEnd > nonSpecialStart):
+                encoding=encoding + encodeNonSpecial(textString[nonSpecialStart:nonSpecialEnd])
+            #if ( (prevSpecialTokenEnd == None) or (rnge[0] > prevSpecialTokenEnd) ):
+            encoding.append(findWhichSpecialToken(textString[rnge[0]:rnge[1]]))
+                #prevSpecialTokenEnd=rnge[1]
+                
+        if (specialTokenRanges[-1][1] < len(textString) ):
+            encoding=encoding + encodeNonSpecial(textString[specialTokenRanges[-1][1]:])
+        
+        return encoding
+ 
     def decode(self,tokenList):
         numTok=len(tokenList)
-        print('1/5')
-        return ''.join([self.vocab[t].decode('utf-8',errors='ignore') for t in tokenList[0:numTok]])
+        
+        tokIdx=0
+        ret=''
+        print('tokenList',tokenList)
+        while (tokIdx < numTok):
+            tok=tokenList[tokIdx]
+            theBytes=self.vocab[tok]
+            #lastByte=theBytes[-1]
+
+            bytesLen=len(theBytes)
+
+            numBytesToDecode=bytesLen
+            for bIdx in range(len(theBytes)):
+                theByte=theBytes[bIdx]
+                def numToDecode(aByte):
+                    numBytesToDecode=1
+                    if ( (theByte >= 192) and (theByte <= 223) ):
+                        numBytesToDecode=2
+                    elif ( ( theByte >=224) and (theByte <=239) ):
+                        numBytesToDecode=3
+                    elif ( (theByte >= 240) and (theByte <= 247) ):
+                        numBytesToDecode=4
+                    return numBytesToDecode
+                numBytesToDecodeFromHere=numToDecode(theByte)
+                totalNumBytesToDecode=numBytesToDecodeFromHere + bIdx
+                if (totalNumBytesToDecode > numBytesToDecode):
+                    numBytesToDecode=totalNumBytesToDecode
+                    
+                
+            
+            #print('theBytes',theBytes)
+            #theInt=int(theBytes.hex(),base=16)
+            #theBitString=bin(theInt)[2:]
+            #print('theBitString',theBitString)
+            #if ( (theInt < 128)or (theBitString[0:2]=='10')):
+            #    numBytesToDecode=1
+            #elif (theBitString[0:3]=='110'):
+            #    numBytesToDecode=2
+            #elif (theBitString[0:4]=='1110'):
+            #    numBytesToDecode=3
+            #else:
+            #    numBytesToDecode=4
+
+            #print('numBytesToDecode',numBytesToDecode)
+            toDecode=self.vocab[tokenList[tokIdx]]
+            numBytesWeHave=len(toDecode)
+
+            print('numBytesWeHave',numBytesWeHave)
+            print('numBytesToDecode',numBytesToDecode)
+            tokIdx=tokIdx + 1
+            while ( (tokIdx < len(tokenList)) and (numBytesWeHave < numBytesToDecode) ): 
+                print('decoding ',tokenList[tokIdx])
+                toDecode=toDecode + self.vocab[tokenList[tokIdx]]
+                numBytesWeHave=len(toDecode)
+                if ( (self.special_tokens != None) and (tokenList[tokIdx] in self.special_tokens) ):
+                    numBytesWeHave=numBytesToDecode
+                tokIdx=tokIdx + 1
+            #print('tokIdx is',tokIdx)
+            #later: handle 3 bytes or 4 bytes
+            #if ( (tok > 192) and (tok < 256) ):
+            #    toDecode=self.vocab[tokenList[tokIdx]] + self.vocab[tokenList[tokIdx + 1]]
+            #    tokIdx=tokIdx + 2
+            #    print('yes')
+            #else:
+            #    toDecode=self.vocab[tokenList[tokIdx]]
+            #    tokIdx=tokIdx + 1
+            #    print('no')
+            #print('toDecode len is',len(toDecode))
+            #print('toDecode is ', toDecode)
+            try:
+                print('added  ', toDecode.decode('utf-8'))
+                ret=ret + toDecode.decode('utf-8')
+            except UnicodeDecodeError:
+                if (len(tokenList)==1):
+                    pass
+                    
+        return ret #''.join([self.vocab[t].decode('utf-8') for t in tokenList[0:numTok]])
         #print('2/5')
         #print(''.join([self.vocab[t].decode('utf-8') for t in tokenList[0:int(2.*numTok/5.)]]))
         #print('3/5')
@@ -881,7 +989,66 @@ class Node:
         self.prevNode=prevNode
 
 
+
+def getSpecialTokenLocs(sTok,lne):
+    locs=[]
+    strt=0
+    sTokLen=len(sTok)
+    while (True):
+        loc=lne[strt:].find(sTok)
+        if (loc==-1):
+            return locs
+        else:
+            locs.append(strt + loc)
+            strt=strt + loc + sTokLen
+
+def getAllSpecialTokenLocs(lne,special_tokens):
+    dct=dict()
+    if (special_tokens==None):
+        return []
+    specialTokensPresent=[]
     
+    for sTok in special_tokens:
+        sTokLen=len(sTok)
+        locs=getSpecialTokenLocs(sTok,lne)
+
+
+        if (len(locs) > 0):
+            dct[sTok]=[(l,l+sTokLen) for l in locs]
+            specialTokensPresent.append(sTok)
+
+    withLengths=[(s,len(s)) for s in specialTokensPresent]
+    withLengths=sorted(withLengths,key=lambda x: x[1],reverse=True)
+    
+    allSpecialTokenRanges=[]
+
+    alreadyAddedStarts=set()
+    alreadyAddedEnds=set()
+    for sTokWithLength in withLengths:
+        sTok=sTokWithLength[0]
+
+        for rng in dct[sTok]:
+            if ( (not (rng[0] in alreadyAddedStarts) ) and ( not (rng[1] in alreadyAddedEnds)  ) ):
+                allSpecialTokenRanges.append(rng)#=allSpecialTokenRanges + dct[sTok]
+                alreadyAddedStarts.add(rng[0])
+                alreadyAddedEnds.add(rng[1])
+                
+    return sorted(allSpecialTokenRanges,key=lambda x: x[0])
+
+def getInitIndicesForNonSpecial(nonSpecialStr):
+    lst=list(map(int,nonSpecialStr.encode('utf-8')))
+    if (len(lst)==0):
+        return None
+    lenLstMinus1=len(lst)-1
+    prevNode=None
+    for lIndx in range(lenLstMinus1,-1,-1):
+        node=Node(lst[lIndx],nextNode=prevNode)
+        if (prevNode != None):
+            prevNode.prevNode=node
+        prevNode=node
+    return node
+
+
 def run_train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
@@ -921,34 +1088,6 @@ def run_train_bpe(
         currVocabSize=currVocabSize + 1
 
 
-    def getSpecialTokenLocs(sTok,lne):
-        locs=[]
-        strt=0
-        sTokLen=len(sTok)
-        while (True):
-            loc=lne[strt:].find(sTok)
-            if (loc==-1):
-                return locs
-            else:
-                locs.append(strt + loc)
-                strt=strt + loc + sTokLen
-
-    def getAllSpecialTokenLocs(lne):
-        dct=dict()
-        for sTok in special_tokens:
-            sTokLen=len(sTok)
-            locs=getSpecialTokenLocs(sTok,lne)
-            #print('sTok',sTok)
-            #print('locs',locs)
-            if (len(locs) > 0):
-                dct[sTok]=[(l,l+sTokLen) for l in locs]
-        #reverseDct=dict() 
-        allSpecialTokenRanges=[]
-        for sTok in dct:
-            allSpecialTokenRanges=allSpecialTokenRanges + dct[sTok]
-        return sorted(allSpecialTokenRanges,key=lambda x: x[0])
-
-
     content=open(input_path,'r').read()
 
     print('eSpaceCount',len(content.split('e ')))
@@ -957,25 +1096,13 @@ def run_train_bpe(
     inF=open(input_path,'r')
     line=inF.readline()
     
-    def getInitIndicesForNonSpecial(nonSpecialStr):
-        lst=list(map(int,nonSpecialStr.encode('utf-8')))
-        if (len(lst)==0):
-            return None
-        lenLstMinus1=len(lst)-1
-        prevNode=None 
-        for lIndx in range(lenLstMinus1,-1,-1):
-            node=Node(lst[lIndx],nextNode=prevNode)
-            if (prevNode != None):
-                prevNode.prevNode=node
-            prevNode=node
-        return node
     
     nonSpecialIndicesList=[]
     #lineCount=0
     totalLen=0
     while (line != ''):
         totalLen=totalLen + len(line)
-        allSpecialTokenRanges=getAllSpecialTokenLocs(line)
+        allSpecialTokenRanges=getAllSpecialTokenLocs(line,special_tokens)
         #print('ALL RANGES',allSpecialTokenRanges)
         if (len(allSpecialTokenRanges)==0):
             nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line))
