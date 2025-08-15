@@ -12,7 +12,7 @@ from torch import Tensor
 import numpy as np
 from torch import nn
 import time
-#import pickle
+import pickle
 
 def run_linear(
     d_in: int,
@@ -239,23 +239,36 @@ def run_rope(
         sinesAbove=torch.tensor(np.concatenate([[-np.sin(tht),0] for tht in thetas]))
         rMat=torch.zeros(d,d)
         rMat=rMat.diagonal_scatter(cosines)
-        rMat=rMat.diagonal_scatter(sinesBelow[0:-1],-1)
-        rMat=rMat.diagonal_scatter(sinesAbove[0:-1],1)
+        rMat=rMat.diagonal_scatter(sinesBelow[0:-1],1)
+        rMat=rMat.diagonal_scatter(sinesAbove[0:-1],-1)
         return rMat
-
+ 
     seqLength=token_positions.shape[-1]
     #allRopeMat=torch.cat([ropeMat(token_positions[i],d_k) for i in range(seqLength)],-1)
-    allRopeMat=ropeMat(token_positions[0],d_k)
-    allRopeMat1=ropeMat(token_positions[1],d_k)
-    allRopeMat
-    print('ALL ROPE MAT SHAPE',allRopeMat.shape)
-    res=in_query_or_key@allRopeMat1
-    print('RES SHAPE',res.shape)
-    print('RES[0][1]',res[0][1])
-    print('IN QUERY SHAPE',in_query_or_key.shape)
-    print('TOKEN POSITIONS 0 is ',token_positions[0])
-    print('TOKEN POSITIONS 1 is ',token_positions[1])
-    print('token positions shape is ',token_positions.shape)
+    res=torch.zeros(in_query_or_key.shape[0],in_query_or_key.shape[1],in_query_or_key.shape[2])
+    for i in range(seqLength):
+        res[:,i,:]=in_query_or_key[:,i,:]@ropeMat(token_positions[i],d_k)
+    #allRopeMat=ropeMat(token_positions[0],d_k)
+    #allRopeMat1=ropeMat(token_positions[1],d_k)
+
+    
+    #allRopeMat
+    #print('d_k',d_k)
+    #print('theta',theta)
+    #print('IN QUERY SHAPE',in_query_or_key.shape)
+    #print('ALL ROPE MAT SHAPE',allRopeMat.shape)
+    #print('TOKEN POSITIONS shape',token_positions.shape)
+    #print('max_seq_len',max_seq_len)
+    #res=in_query_or_key@allRopeMat1
+    #print('RES SHAPE',res.shape)
+    #print('RES[0][1]',res[0][1])
+    #print('TOKEN POSITIONS 0 is ',token_positions[0])
+    #print('TOKEN POSITIONS 1 is ',token_positions[1])
+
+
+    #print('res[0] is')
+    #print(res[0])
+    #print('in_query[0] is ',in_query_or_key[0])
     return res
        
 
@@ -909,11 +922,11 @@ class Tokenizer:
             toDecode=self.vocab[tokenList[tokIdx]]
             numBytesWeHave=len(toDecode)
 
-            print('numBytesWeHave',numBytesWeHave)
-            print('numBytesToDecode',numBytesToDecode)
+            #print('numBytesWeHave',numBytesWeHave)
+            #print('numBytesToDecode',numBytesToDecode)
             tokIdx=tokIdx + 1
             while ( (tokIdx < len(tokenList)) and (numBytesWeHave < numBytesToDecode) ): 
-                print('decoding ',tokenList[tokIdx])
+                #print('decoding ',tokenList[tokIdx])
                 toDecode=toDecode + self.vocab[tokenList[tokIdx]]
                 numBytesWeHave=len(toDecode)
                 if ( (self.special_tokens != None) and (tokenList[tokIdx] in self.special_tokens) ):
@@ -932,7 +945,7 @@ class Tokenizer:
             #print('toDecode len is',len(toDecode))
             #print('toDecode is ', toDecode)
             try:
-                print('added  ', toDecode.decode('utf-8'))
+                #print('added  ', toDecode.decode('utf-8'))
                 ret=ret + toDecode.decode('utf-8')
             except UnicodeDecodeError:
                 if (len(tokenList)==1):
