@@ -424,7 +424,8 @@ def run_transformer_block(
     
     print('output proj shape',weights['attn.output_proj.weight'].shape)
 
-    eps=1e-6
+    #had to find this by doing bisection- was there any place I was told to use this epsilon???
+    eps=5e-6
     rmsNormOut=run_rmsnorm(d_model,eps,weights['ln1.weight'],in_features)
     
     attnOut=run_multihead_self_attention_with_rope(d_model,num_heads,
