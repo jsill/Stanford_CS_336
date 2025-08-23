@@ -134,7 +134,8 @@ def run_scaled_dot_product_attention(
     print('---------------- ')
 
     print('QK shape in here is',QKTranspose.shape)
-    print('mask shape is',mask.shape)
+    if (mask != None):
+        print('mask shape is',mask.shape)
     print('---------------------')
     
     if (mask != None): 
@@ -145,7 +146,7 @@ def run_scaled_dot_product_attention(
     return SMResult@V
     #raise NotImplementedError
 
-
+    
 def run_multihead_self_attention(
     d_model: int,
     num_heads: int,
@@ -223,6 +224,7 @@ def run_multihead_self_attention_with_rope(
     v_proj_weight: Float[Tensor, " d_v d_in"],
     o_proj_weight: Float[Tensor, " d_model d_v"],
     in_features: Float[Tensor, " ... sequence_length d_in"],
+        #doMask=False,
     token_positions: Int[Tensor, " ... sequence_length"] | None = None,
 ) -> Float[Tensor, " ... sequence_length d_out"]:
     """
@@ -251,6 +253,8 @@ def run_multihead_self_attention_with_rope(
         implementation with the given QKV projection weights and input features.
     """
 
+    print('in features shape here',in_features.shape)
+    
     d_k=int(d_model/num_heads)
 
 
@@ -265,7 +269,7 @@ def run_multihead_self_attention_with_rope(
  
     #print('theta in multihead',theta)
     #print('d_k in multihead',d_k)
-    #print('token_positions',token_positions)
+    print('token_positions',token_positions)
     for h in range(num_heads):#range(num_heads -1,-1,-1):                                                                                                                                   
         startIdx=h*d_k
 
@@ -277,11 +281,17 @@ def run_multihead_self_attention_with_rope(
                 mask[i][j]=i >= j
         #REVISIT, this passes the test but this is not the right way to handle the token positions...I'm taking advantage
         #of the token positions just being a 2-d version of a 1-d array in the test
+
+        #if (doMask):
         res=run_scaled_dot_product_attention(run_rope(d_k,theta,seqLen,q_proj[:,:,startIdx:endIdx],token_positions[0]),
                                              run_rope(d_k,theta,seqLen,k_proj[:,:,startIdx:endIdx],token_positions[0]),
                                              v_proj[:,:,startIdx:endIdx],mask)
-        headList.append(res)
-
+        #else:
+        #    res=run_scaled_dot_product_attention(run_rope(d_k,theta,seqLen,q_proj[:,:,startIdx:endIdx],token_positions[0]),
+        #                                         run_rope(d_k,theta,seqLen,k_proj[:,:,startIdx:endIdx],token_positions[0]),
+        #                                         v_proj[:,:,startIdx:endIdx])
+        headList.append(res) 
+ 
     concatResult=torch.concat(headList,-1)
  
     output=concatResult@torch.transpose(o_proj_weight,0,1)
@@ -325,7 +335,8 @@ def run_rope(
         rMat=rMat.diagonal_scatter(sinesBelow[0:-1],1)
         rMat=rMat.diagonal_scatter(sinesAbove[0:-1],-1)
         return rMat
- 
+
+    print('--- token_positions',token_positions)
     seqLength=token_positions.shape[-1]
     #allRopeMat=torch.cat([ropeMat(token_positions[i],d_k) for i in range(seqLength)],-1)
     res=torch.zeros(in_query_or_key.shape[0],in_query_or_key.shape[1],in_query_or_key.shape[2])
@@ -338,7 +349,7 @@ def run_rope(
 
 def run_transformer_block(
     d_model: int,
-    num_heads: int,
+    num_heads: int, 
     d_ff: int,
     max_seq_len: int,
     theta: float,
@@ -406,7 +417,65 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+ 
+    tokenPos=torch.Tensor([[i for i in range(0,in_features.shape[1] )]])
+    print('tokenPos',tokenPos)
+    print('in features shape',in_features.shape)
+    
+    print('output proj shape',weights['attn.output_proj.weight'].shape)
+
+    eps=1e-6
+    rmsNormOut=run_rmsnorm(d_model,eps,weights['ln1.weight'],in_features)
+    
+    attnOut=run_multihead_self_attention_with_rope(d_model,num_heads,
+                                                   max_seq_len,
+                                                   theta,
+                                                   weights['attn.q_proj.weight'],
+                                                   weights['attn.k_proj.weight'],
+                                                   weights['attn.v_proj.weight'],
+                                                   weights['attn.output_proj.weight'],
+                                                   rmsNormOut,#in_features,
+                                                   tokenPos)
+
+    print('attnOut shape',attnOut.shape)
+ 
+    #eps=1e-5
+    
+    rmsNormOut2=run_rmsnorm(d_model,eps,weights['ln2.weight'],
+                            attnOut + in_features)
+
+    d_ff=weights['ffn.w1.weight'].shape[0]
+    
+    #swigluOut=run_swiglu(d_model,d_ff,weights['ffn.w1.weight'],
+    #                     torch.transpose(weights['ffn.w3.weight'],0,1),
+    #                     torch.transpose(weights['ffn.w2.weight'],0,1),
+    #                     rmsNormOut2)
+
+    print('d_ff is ', d_ff)
+    
+    swigluOut=run_swiglu(d_model,d_ff,weights['ffn.w1.weight'],
+                         weights['ffn.w2.weight'],
+                         weights['ffn.w3.weight'],
+                         rmsNormOut2)
+
+    
+    #print('rmsNorm out shape',rmsNormOut.shape)
+    
+    #print('**** swigluOut shape',swigluOut.shape)
+    #rmsOut2=run_rmsnorm(d_model,eps,weights['ln2.weight'],swigluOut + rmsNormOut)
+     
+    
+    print('ffn w1 shape',weights['ffn.w1.weight'].shape)
+    print('ffn w2 shape',weights['ffn.w2.weight'].shape)
+    print('ffn w3 shape',weights['ffn.w3.weight'].shape)
+
+    
+    return swigluOut + attnOut + in_features
+
+     
+
+    #raise Exception('I tried')
+    #raise NotImplementedError
 
 
 def run_transformer_lm(
@@ -490,7 +559,7 @@ def run_transformer_lm(
     """
     raise NotImplementedError
 
-
+  
 def run_rmsnorm(
     d_model: int,
     eps: float,
@@ -604,7 +673,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-
+ 
     maxes=torch.max(in_features,dim)[0]
     in_features=torch.transpose(torch.transpose(in_features,0,dim)-maxes,dim,0)
     in_features_exp=torch.exp(in_features)
