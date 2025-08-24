@@ -131,12 +131,12 @@ def run_scaled_dot_product_attention(
     dk=float(K.shape[-1]) 
     QKTransposeScaled=QKTranspose/np.sqrt(dk)
 
-    print('---------------- ')
+    #print('---------------- ')
 
-    print('QK shape in here is',QKTranspose.shape)
-    if (mask != None):
-        print('mask shape is',mask.shape)
-    print('---------------------')
+    #print('QK shape in here is',QKTranspose.shape)
+    #if (mask != None):
+    #    print('mask shape is',mask.shape)
+    #print('---------------------')
     
     if (mask != None): 
         QKTransposeScaled += np.array(np.where(mask==1,0,-np.inf),dtype=np.float32)
@@ -269,7 +269,7 @@ def run_multihead_self_attention_with_rope(
  
     #print('theta in multihead',theta)
     #print('d_k in multihead',d_k)
-    print('token_positions',token_positions)
+    #print('token_positions',token_positions)
     for h in range(num_heads):#range(num_heads -1,-1,-1):                                                                                                                                   
         startIdx=h*d_k
 
@@ -558,7 +558,46 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+
+
+    layerOutput=run_embedding(vocab_size,d_model,weights['token_embeddings.weight'],
+                              in_indices)
+    
+    for i in range(num_layers):
+        weightDct=dict()
+        for ky in ['attn.q_proj.weight',
+                   'attn.k_proj.weight',
+                   'attn.v_proj.weight',
+                   'attn.output_proj.weight',
+                   'ln1.weight',
+                   'ln2.weight',
+                   'ffn.w1.weight',
+                   'ffn.w2.weight',
+                   'ffn.w3.weight']:
+            weightDct[ky]=weights['layers.%d.%s'%(i,ky)]
+
+            #print('keys are!!!')
+            #print([ky for ky in weightDct])
+        layerOutput=run_transformer_block(d_model,
+                                          num_heads,
+                                          d_ff,
+                                          context_length,#???
+                                          rope_theta,
+                                          weightDct,
+                                          layerOutput)#????
+            
+
+    eps=5e-6
+    normed=run_rmsnorm(d_model,eps,weights['ln_final.weight'],layerOutput)
+    finalOut=normed@torch.transpose(weights['lm_head.weight'],0,1)
+    return finalOut#run_embedding(vocab_size,d_model,
+                   #      weights['lm_head.weight'],
+                   #      finalOut)
+
+
+    #return finalOut@torch.transpose(weights['lm_head.weight'],0,1)
+
+    #raise NotImplementedError
 
   
 def run_rmsnorm(
@@ -1224,8 +1263,8 @@ def run_train_bpe(
     """
 
     
-    print('special tokens are',special_tokens)
-    print('vocab_size is ',vocab_size)
+    #print('special tokens are',special_tokens)
+    #print('vocab_size is ',vocab_size)
     vocab={x:bytes([x]) for x in range(256)}
     
     currVocabSize=len(vocab)
@@ -1236,8 +1275,8 @@ def run_train_bpe(
 
     content=open(input_path,'r').read()
 
-    print('eSpaceCount',len(content.split('e ')))
-    print('spaceTCount',len(content.split(' t')))
+    ##print('eSpaceCount',len(content.split('e ')))
+    #print('spaceTCount',len(content.split(' t')))
     
     inF=open(input_path,'r')
     line=inF.readline()
@@ -1273,8 +1312,8 @@ def run_train_bpe(
     numMerges=vocab_size - currVocabSize
  
     merges=[None]*numMerges
-    print('starting merges')
-    print('num chunks',len(nonSpecialIndicesList))
+    #print('starting merges')
+    #print('num chunks',len(nonSpecialIndicesList))
 
     if (len(nonSpecialIndicesList) > 2000):
         raise Exception('NOO')
@@ -1306,7 +1345,7 @@ def run_train_bpe(
     def show(x):
         pair,cnt=x
         print((vocab[pair[0]],vocab[pair[1]],cnt))
-    print('cntTuples',[show(c) for c in cntTuples[0:10]])
+    #print('cntTuples',[show(c) for c in cntTuples[0:10]])
     
 
     MINUS_LARGE=-100000
@@ -1407,8 +1446,8 @@ def run_train_bpe(
     #print('vocab_size is ', vocab_size)
     #print('cntDct is',cntDct)
     #time.sleep(0.05)
-    print('first merge is ', merges[0])
-    print('first 10 are ', merges[0:10])
+    #print('first merge is ', merges[0])
+    #print('first 10 are ', merges[0:10])
     return vocab,merges  
     
  
