@@ -986,10 +986,19 @@ class Tokenizer:
         toks=[ky for ky in self.vocab]
         self.bytesToTok=dict(zip([self.vocab[t] for t in toks],toks))
 
+    def encode_iterable(self,aFile):
+        CHUNK_SIZE=100000
+        chunk=aFile.read(CHUNK_SIZE)
+        encoding=[]
+        while (chunk != ''):
+            encoding=encoding + self.encode(chunk)
+            chunk=aFile.read(CHUNK_SIZE)
+        return encoding
+    
     def encode(self,textString):
 
-        print('testString is',textString)
-        print('special tokens are',self.special_tokens)
+        #print('testString is',textString)
+        #print('special tokens are',self.special_tokens)
         specialTokenRanges=getAllSpecialTokenLocs(textString,self.special_tokens)
 
         
