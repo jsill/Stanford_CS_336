@@ -1225,12 +1225,12 @@ def getInitIndicesForNonSpecial(nonSpecialStr):
     if (len(lst)==0):
         return None
     lenLstMinus1=len(lst)-1
-    prevNode=None
+    nodeAfter=None
     for lIndx in range(lenLstMinus1,-1,-1):
-        node=Node(lst[lIndx],nextNode=prevNode)
-        if (prevNode != None):
-            prevNode.prevNode=node
-        prevNode=node
+        node=Node(lst[lIndx],nextNode=nodeAfter)
+        if (nodeAfter != None):
+            nodeAfter.prevNode=node
+        nodeAfter=node
     return node
 
 
@@ -1265,6 +1265,10 @@ def run_train_bpe(
     
     #print('special tokens are',special_tokens)
     #print('vocab_size is ',vocab_size)
+
+    import datetime
+    print('at start',datetime.datetime.now())
+    
     vocab={x:bytes([x]) for x in range(256)}
     
     currVocabSize=len(vocab)
@@ -1275,54 +1279,50 @@ def run_train_bpe(
 
     content=open(input_path,'r').read()
 
-    ##print('eSpaceCount',len(content.split('e ')))
-    #print('spaceTCount',len(content.split(' t')))
-    
-    inF=open(input_path,'r')
-    line=inF.readline()
-    
+    print('read it',datetime.datetime.now())
     
     nonSpecialIndicesList=[]
-    #lineCount=0
-    totalLen=0
-    while (line != ''):
-        totalLen=totalLen + len(line)
-        allSpecialTokenRanges=getAllSpecialTokenLocs(line,special_tokens)
-        #print('ALL RANGES',allSpecialTokenRanges)
-        if (len(allSpecialTokenRanges)==0):
-            nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line))
-        else:
-            for rngIdx in range(len(allSpecialTokenRanges)):
-                rnge=allSpecialTokenRanges[rngIdx]
-                nonSpecialEnd=rnge[0]
-                if (rngIdx==0):
-                    nonSpecialStart=0
-                else:
-                    nonSpecialStart=allSpecialTokenRanges[rngIdx-1][1]
-                #print('line type',type(line))
-                #print('line len',len(line))
-                if (nonSpecialEnd > nonSpecialStart):
-                    nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line[nonSpecialStart:nonSpecialEnd]))
-        line=inF.readline()
+
+    line=content
+    
+    allSpecialTokenRanges=getAllSpecialTokenLocs(line,special_tokens)
+
+    print('got special',datetime.datetime.now())
+
+    if (len(allSpecialTokenRanges)==0):
+        nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line))
+    else:
+        for rngIdx in range(len(allSpecialTokenRanges)):
+            rnge=allSpecialTokenRanges[rngIdx]
+            nonSpecialEnd=rnge[0]
+            if (rngIdx==0):
+                nonSpecialStart=0
+            else:
+                nonSpecialStart=allSpecialTokenRanges[rngIdx-1][1]
+
+            if (nonSpecialEnd > nonSpecialStart):
+                nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line[nonSpecialStart:nonSpecialEnd]))
+        #line=inF.readline()
         #lineCount=lineCount + 1
-    inF.close()
+    #inF.close()
 
     #print('totalLen',totalLen)
     #print('lineCount',lineCount)
+    
     numMerges=vocab_size - currVocabSize
  
     merges=[None]*numMerges
-    #print('starting merges')
-    #print('num chunks',len(nonSpecialIndicesList))
 
+    print('made merges',datetime.datetime.now())
+ 
     if (len(nonSpecialIndicesList) > 2000):
         raise Exception('NOO')
-     
+
+    
     numNonSpecial=len(nonSpecialIndicesList)
     numNonSpecialRange=range(numNonSpecial)
     
-
-        #print('mIdx ', mIdx)
+    
     locDct=dict()
     for indicesIdx in numNonSpecialRange:
         indicesHeadNode=nonSpecialIndicesList[indicesIdx]
@@ -1330,9 +1330,17 @@ def run_train_bpe(
         indicesCurrNode=indicesHeadNode
         while (indicesCurrNode.nextNode != None):
             pair=(indicesCurrNode.data,indicesCurrNode.nextNode.data)
-            locDct[(indicesIdx,pair)]=locDct.get((indicesIdx,pair),[])  + [indicesCurrNode]
+            if ((indicesIdx,pair) in locDct):
+                locDct[(indicesIdx,pair)].add(indicesCurrNode)
+            else:
+                locDct[(indicesIdx,pair)]=set([indicesCurrNode])
+            #st=locDct.get((indicesIdx,pair),set())
+            #st.add(indicesCurrNode)
+            #locDct[(indicesIdx,pair)]=locDct.get((indicesIdx,pair),[])  + [indicesCurrNode]
             indicesCurrNode=indicesCurrNode.nextNode
 
+    print('set up nodes',datetime.datetime.now())
+    
     cntDct=dict()
 
     for ky in locDct:
@@ -1360,7 +1368,8 @@ def run_train_bpe(
         #print(anStr)
         #print('---------')
 
-        
+    import datetime
+    print('starting------',datetime.datetime.now())  
     for mIdx in range(numMerges):
        #print('MERGE START')
        #print('cntDct iv is ',cntDct.get((105,118),0))
@@ -1382,7 +1391,7 @@ def run_train_bpe(
               
        for indicesIdx in range(len(nonSpecialIndicesList)):
            indices=nonSpecialIndicesList[indicesIdx]
-           locNodes=locDct.get((indicesIdx,topPair),[])
+           locNodes=locDct.get((indicesIdx,topPair),set())
            if (len(locNodes) !=0):
                for node in locNodes:
 
@@ -1448,6 +1457,8 @@ def run_train_bpe(
     #time.sleep(0.05)
     #print('first merge is ', merges[0])
     #print('first 10 are ', merges[0:10])
+
+    print('done',datetime.datetime.now())
     return vocab,merges  
     
  
