@@ -13,6 +13,7 @@ import numpy as np
 from torch import nn
 import time
 import pickle
+import gc
 
 def run_linear(
     d_in: int,
@@ -993,16 +994,52 @@ class Tokenizer:
         while (chunk != ''):
             encoding=encoding + self.encode(chunk)
             chunk=aFile.read(CHUNK_SIZE)
+            gc.collect()
         return encoding
     
     def encode(self,textString):
 
-        #print('testString is',textString)
-        #print('special tokens are',self.special_tokens)
         specialTokenRanges=getAllSpecialTokenLocs(textString,self.special_tokens)
 
-        
         def encodeNonSpecial(nonSpecialTextString):
+            
+            headNode=getInitIndicesForNonSpecial(nonSpecialTextString,bytesToTok=self.bytesToTok)
+
+            resultAr=np.zeros(len(nonSpecialTextString),dtype=np.int64)
+            
+            for m in self.merges:
+                t1,t2=m
+                
+                tok1=self.bytesToTok[t1]
+                tok2=self.bytesToTok[t2]
+                
+                mergedTok=self.bytesToTok[t1 + t2 ]
+                currNode=headNode
+ 
+                while ( (currNode != None) and (currNode.nextNode != None) ):
+                    
+                    if ( (currNode.data==tok1) and (currNode.nextNode.data==tok2) ):
+                        currNode.data=mergedTok
+                        #print('merges ', t1+t2,mergedTok)
+                        currNode.nextNode=currNode.nextNode.nextNode
+                        if (currNode.nextNode != None):
+                            currNode.nextNode.prevNode=currNode
+                    currNode=currNode.nextNode
+                #print('ending')
+                
+            #toks=[]
+            
+            idx=0
+            currNode=headNode
+            toks=[]
+            while (currNode != None):
+                #resultAr[idx]=currNode.data
+                idx=idx + 1
+                toks.append(currNode.data)
+                currNode=currNode.nextNode
+            return toks#resultAr[0:idx].tolist()
+            
+        def encodeNonSpecialOld(nonSpecialTextString):
             textBytes=nonSpecialTextString.encode('utf-8')
             strLenInBytes=len(textBytes)
             idx=0
@@ -1059,7 +1096,7 @@ class Tokenizer:
         
         tokIdx=0
         ret=''
-        print('tokenList',tokenList)
+
         while (tokIdx < numTok):
             tok=tokenList[tokIdx]
             theBytes=self.vocab[tok]
@@ -1228,9 +1265,15 @@ def getAllSpecialTokenLocs(lne,special_tokens):
                 alreadyAddedEnds.add(rng[1])
                 
     return sorted(allSpecialTokenRanges,key=lambda x: x[0])
-
-def getInitIndicesForNonSpecial(nonSpecialStr):
-    lst=list(map(int,nonSpecialStr.encode('utf-8')))
+ 
+def getInitIndicesForNonSpecial(nonSpecialStr,bytesToTok=None):
+    if (bytesToTok==None):
+        lst=list(map(int,nonSpecialStr.encode('utf-8')))
+    else:
+        encoded=nonSpecialStr.encode('utf-8')
+        lst=[bytesToTok[encoded[i:i+1]] for i in range(len(encoded))]
+    #print('nonSpecial HERE is',nonSpecialStr)
+    #print('lst through 20 is',lst[0:20])
     if (len(lst)==0):
         return None
     lenLstMinus1=len(lst)-1
@@ -1324,8 +1367,8 @@ def run_train_bpe(
 
     print('made merges',datetime.datetime.now())
  
-    if (len(nonSpecialIndicesList) > 2000):
-        raise Exception('NOO')
+    #if (len(nonSpecialIndicesList) > 2000):
+    #    raise Exception('NOO')
 
     
     numNonSpecial=len(nonSpecialIndicesList)
