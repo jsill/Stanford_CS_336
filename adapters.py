@@ -337,7 +337,7 @@ def run_rope(
         rMat=rMat.diagonal_scatter(sinesAbove[0:-1],-1)
         return rMat
 
-    print('--- token_positions',token_positions)
+    #print('--- token_positions',token_positions)
     seqLength=token_positions.shape[-1]
     #allRopeMat=torch.cat([ropeMat(token_positions[i],d_k) for i in range(seqLength)],-1)
     res=torch.zeros(in_query_or_key.shape[0],in_query_or_key.shape[1],in_query_or_key.shape[2])
@@ -992,9 +992,10 @@ class Tokenizer:
         chunk=aFile.read(CHUNK_SIZE)
         encoding=[]
         while (chunk != ''):
+            print(chunk[0:100])
             encoding=encoding + self.encode(chunk)
             chunk=aFile.read(CHUNK_SIZE)
-            gc.collect()
+            #gc.collect()
         return encoding
     
     def encode(self,textString):
@@ -1002,14 +1003,18 @@ class Tokenizer:
         specialTokenRanges=getAllSpecialTokenLocs(textString,self.special_tokens)
 
         def encodeNonSpecial(nonSpecialTextString):
-            
+            #print('in')
             headNode=getInitIndicesForNonSpecial(nonSpecialTextString,bytesToTok=self.bytesToTok)
-
-            resultAr=np.zeros(len(nonSpecialTextString),dtype=np.int64)
+            #print('got init')
             
+            
+            #print('num merges',len(self.merges))
+            cnt=0
             for m in self.merges:
                 t1,t2=m
-                
+                #if (cnt%100==0):
+                #    print('cnt',cnt)
+                cnt=cnt + 1
                 tok1=self.bytesToTok[t1]
                 tok2=self.bytesToTok[t2]
                 
@@ -1032,6 +1037,7 @@ class Tokenizer:
             idx=0
             currNode=headNode
             toks=[]
+            print('making toks')
             while (currNode != None):
                 #resultAr[idx]=currNode.data
                 idx=idx + 1
@@ -1070,6 +1076,19 @@ class Tokenizer:
             return encodeNonSpecial(textString)
 
         #prevSpecialTokenEnd=None
+        #print('specialTokenRanges',specialTokenRanges)
+
+        def doByLine(allText):
+            encodingLst=[]
+            lineSplits=allText.split('\n')
+
+            for lsIdx in range(len(lineSplits)):
+            
+                encodingLst=encodingLst + encodeNonSpecial(lineSplits[lsIdx])
+                if (lsIdx < len(lineSplits) -1):
+                    encodingLst=encodingLst + [self.bytesToTok[b'\n']]
+            return encodingLst
+        
         for rngIdx in range(len(specialTokenRanges)):
             rnge=specialTokenRanges[rngIdx]
             #this is the non-special text chunk *preceding* the special token
@@ -1081,13 +1100,15 @@ class Tokenizer:
                 
 
             if (nonSpecialEnd > nonSpecialStart):
-                encoding=encoding + encodeNonSpecial(textString[nonSpecialStart:nonSpecialEnd])
+                chunkText=textString[nonSpecialStart:nonSpecialEnd]
+
+                encoding=encoding + doByLine(chunkText)
             #if ( (prevSpecialTokenEnd == None) or (rnge[0] > prevSpecialTokenEnd) ):
             encoding.append(findWhichSpecialToken(textString[rnge[0]:rnge[1]]))
                 #prevSpecialTokenEnd=rnge[1]
                 
         if (specialTokenRanges[-1][1] < len(textString) ):
-            encoding=encoding + encodeNonSpecial(textString[specialTokenRanges[-1][1]:])
+            encoding=encoding + doByLine(textString[specialTokenRanges[-1][1]:])#encodeNonSpecial(textString[specialTokenRanges[-1][1]:])
         
         return encoding
  
@@ -1315,7 +1336,7 @@ def run_train_bpe(
     """
 
     
-    #print('special tokens are',special_tokens)
+    print('special tokens are',special_tokens)
     #print('vocab_size is ',vocab_size)
 
     import datetime
@@ -1331,7 +1352,14 @@ def run_train_bpe(
 
     content=open(input_path,'r').read()
 
-    print('read it',datetime.datetime.now())
+    #print('content is',content[0:30000])
+
+    #content2=content.replace('e ','')
+    
+    #print('e space count',len(content2.split('e ')))
+    #print('space t count',len(content2.split(' t')))
+    #raise Exception('done')
+    #print('read it',datetime.datetime.now())
     
     nonSpecialIndicesList=[]
 
@@ -1421,13 +1449,30 @@ def run_train_bpe(
         #print('---------')
 
     import datetime
-    print('starting------',datetime.datetime.now())  
+    print('starting------',datetime.datetime.now())
+    print('vocab init is',vocab)
+
+    vals=[v for v in vocab.values()]
+    print('vals are\n',vals)
+    # print('cnt space t:::')
+    # print(vals[32],vals[116])
+    print(cntDct[(32,116)])
+
+    kys=[ky for ky in cntDct.keys()]
+    print('kys thro 5',kys[1:5])
+    print('e space:::')
+    print(vals[101],vals[32])
+    print(cntDct[(101,32)])
     for mIdx in range(numMerges):
        #print('MERGE START')
        #print('cntDct iv is ',cntDct.get((105,118),0))
        #print('just checking:',vocab[105] + vocab[118])
        #topPair=cntTuples[0][0]
        topPair=max(cntDct,key=cntDct.get)
+       #if (mIdx==0):
+           
+       #    print("count for e' ' is ",topPair,cntDct[topPair])
+       #    print('count for space t is ',(vocab[b" "],vocab[b"t"]),cntDct[(vocab[b" "],vocab[b"t"])])
        if (cntDct[topPair]==0):
            continue
        #cntTuples=cntTuples[1:]#del cntDct[topPair]
@@ -1436,8 +1481,10 @@ def run_train_bpe(
        b2=vocab[topPair[1]]
        newTok=currVocabSize
        vocab[newTok]=b1 + b2
- 
-       #print('------ added %s -----'%(b1+b2))
+
+       #if (mIdx < 6):
+       #    print(b1,b2)
+       #    print('------ added %s -----'%(b1+b2))
        merges[mIdx]=(b1,b2)
        currVocabSize=currVocabSize + 1
               
