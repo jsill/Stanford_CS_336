@@ -14,6 +14,8 @@ from torch import nn
 import time
 import pickle
 import gc
+import regex as re
+
 
 def run_linear(
     d_in: int,
@@ -420,11 +422,17 @@ def run_transformer_block(
     """
  
     tokenPos=torch.Tensor([[i for i in range(0,in_features.shape[1] )]])
+    print('d_model',d_model)
+    print('num_heads',num_heads)
+    print('d_ff',d_ff)
     print('tokenPos',tokenPos)
+    print('max_seq_len',max_seq_len)
     print('in features shape',in_features.shape)
-    
+    print('ln1.weight shape',weights['ln1.weight'])
+    print('ln2.weight shape',weights['ln2.weight'])
     print('output proj shape',weights['attn.output_proj.weight'].shape)
 
+    #print('ffn shape',
     #had to find this by doing bisection- was there any place I was told to use this epsilon???
     eps=5e-6
     rmsNormOut=run_rmsnorm(d_model,eps,weights['ln1.weight'],in_features)
@@ -975,6 +983,8 @@ def run_load_checkpoint(
     
     #raise NotImplementedError
 
+
+
 class Tokenizer:
 
     def __init__(self,vocab,merges,special_tokens):
@@ -1000,6 +1010,8 @@ class Tokenizer:
     
     def encode(self,textString):
 
+        print('textString is::::\n',textString)
+        
         specialTokenRanges=getAllSpecialTokenLocs(textString,self.special_tokens)
 
         def encodeNonSpecial(nonSpecialTextString):
@@ -1037,7 +1049,7 @@ class Tokenizer:
             idx=0
             currNode=headNode
             toks=[]
-            print('making toks')
+            
             while (currNode != None):
                 #resultAr[idx]=currNode.data
                 idx=idx + 1
@@ -1075,19 +1087,20 @@ class Tokenizer:
         if (specialTokenRanges==[]):
             return encodeNonSpecial(textString)
 
-        #prevSpecialTokenEnd=None
-        #print('specialTokenRanges',specialTokenRanges)
 
         def doByLine(allText):
             encodingLst=[]
             lineSplits=allText.split('\n')
 
             for lsIdx in range(len(lineSplits)):
-            
+
                 encodingLst=encodingLst + encodeNonSpecial(lineSplits[lsIdx])
                 if (lsIdx < len(lineSplits) -1):
                     encodingLst=encodingLst + [self.bytesToTok[b'\n']]
             return encodingLst
+        #prevSpecialTokenEnd=None
+        #print('specialTokenRanges',specialTokenRanges)
+
         
         for rngIdx in range(len(specialTokenRanges)):
             rnge=specialTokenRanges[rngIdx]
@@ -1286,15 +1299,67 @@ def getAllSpecialTokenLocs(lne,special_tokens):
                 alreadyAddedEnds.add(rng[1])
                 
     return sorted(allSpecialTokenRanges,key=lambda x: x[0])
- 
+
+
+
+
+pat_str=r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
+def pretokenizeNonSpecial(nonSpecialStr,
+                          wordCount,
+                          wordToToks,
+                          pairToWord,
+                          tokPairCount):
+
+    for match in re.finditer(pat_str,nonSpecialStr):
+        word=match.group(0)
+        wordCount[word]=wordCount.get(word,0) + 1
+        if (not (word in wordToToks)):
+            tokList=list(map(int,word.encode('utf-8')))
+            wordToToks[word]=tokList
+        else:
+            tokList=wordToToks[word]
+                            
+        pairs=zip(tokList[0:-1],tokList[1:])
+        for pair in pairs:
+            tokPairCount[pair]=tokPairCount.get(pair,0) + 1
+            if (not (pair in pairToWord)):
+                pairToWord[pair]=set([word])
+            else:
+                pairToWord[pair].add(word)
+                
+
 def getInitIndicesForNonSpecial(nonSpecialStr,bytesToTok=None):
-    if (bytesToTok==None):
-        lst=list(map(int,nonSpecialStr.encode('utf-8')))
+
+    splitByLine=False
+
+    #print('BY LINES!!!!!!!!!!!!!!!!!')
+    if (splitByLine):
+        lines=nonSpecialStr.split('\n')
+        numLines=len(lines)
+
+        lst=[]
+        for lineIdx in range(numLines):
+        
+            if (bytesToTok==None):
+                lineLst=list(map(int,lines[lineIdx].encode('utf-8')))
+            else:
+                encoded=lines[lineIdx].encode('utf-8')
+                lineLst=[bytesToTok[encoded[i:i+1]] for i in range(len(encoded))]
+            lst=lst + lineLst
+            if (lineIdx != (numLines -1)):
+                if (bytesToTok==None):
+                    lst=lst + [int('\n'.encode('utf-8')[0])]
+                else:
+                    lst=lst + bytesToTok['\n'.encode('utf-8')]
     else:
-        encoded=nonSpecialStr.encode('utf-8')
-        lst=[bytesToTok[encoded[i:i+1]] for i in range(len(encoded))]
-    #print('nonSpecial HERE is',nonSpecialStr)
-    #print('lst through 20 is',lst[0:20])
+        if (bytesToTok==None):
+            lst=list(map(int,nonSpecialStr.encode('utf-8')))
+        else:
+            encoded=nonSpecialStr.encode('utf-8')
+            lst=[bytesToTok[encoded[i:i+1]] for i in range(len(encoded))]
+    
+    
     if (len(lst)==0):
         return None
     lenLstMinus1=len(lst)-1
@@ -1350,14 +1415,18 @@ def run_train_bpe(
         currVocabSize=currVocabSize + 1
 
 
-    content=open(input_path,'r').read()
+    content=open(input_path,'r').read().lower()
 
+    for sTok in special_tokens:
+        content=content.replace(sTok,'')
+    print('done replacing')
     #print('content is',content[0:30000])
 
     #content2=content.replace('e ','')
     
-    #print('e space count',len(content2.split('e ')))
-    #print('space t count',len(content2.split(' t')))
+    print('e space count',len(content.split('e ')))
+    print('space t count',len(content.split(' t')))
+    print('in count',len(content.split('in')))
     #raise Exception('done')
     #print('read it',datetime.datetime.now())
     
@@ -1369,8 +1438,18 @@ def run_train_bpe(
 
     print('got special',datetime.datetime.now())
 
+    wordCount=dict()
+    wordToToks=dict()
+    pairToWord=dict()
+    tokPairCount=dict()
+     
     if (len(allSpecialTokenRanges)==0):
-        nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line))
+        pretokenizeNonSpecial(line,
+                              wordCount,
+                              wordToToks,
+                              pairToWord,
+                              tokPairCount)
+        #nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line))
     else:
         for rngIdx in range(len(allSpecialTokenRanges)):
             rnge=allSpecialTokenRanges[rngIdx]
@@ -1381,175 +1460,159 @@ def run_train_bpe(
                 nonSpecialStart=allSpecialTokenRanges[rngIdx-1][1]
 
             if (nonSpecialEnd > nonSpecialStart):
-                nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line[nonSpecialStart:nonSpecialEnd]))
-        #line=inF.readline()
-        #lineCount=lineCount + 1
-    #inF.close()
+                pretokenizeNonSpecial(line[nonSpecialStart:nonSpecialEnd],
+                                      wordCount,
+                                      wordToToks,
+                                      pairToWord,
+                                      tokPairCount)
 
-    #print('totalLen',totalLen)
-    #print('lineCount',lineCount)
-    
+   
     numMerges=vocab_size - currVocabSize
  
     merges=[None]*numMerges
 
     print('made merges',datetime.datetime.now())
- 
-    #if (len(nonSpecialIndicesList) > 2000):
-    #    raise Exception('NOO')
-
+     
+    #numNonSpecial=len(nonSpecialIndicesList)
+    #numNonSpecialRange=range(numNonSpecial)
     
-    numNonSpecial=len(nonSpecialIndicesList)
-    numNonSpecialRange=range(numNonSpecial)
-    
-    
-    locDct=dict()
-    for indicesIdx in numNonSpecialRange:
-        indicesHeadNode=nonSpecialIndicesList[indicesIdx]
-        
-        indicesCurrNode=indicesHeadNode
-        while (indicesCurrNode.nextNode != None):
-            pair=(indicesCurrNode.data,indicesCurrNode.nextNode.data)
-            if ((indicesIdx,pair) in locDct):
-                locDct[(indicesIdx,pair)].add(indicesCurrNode)
-            else:
-                locDct[(indicesIdx,pair)]=set([indicesCurrNode])
-            #st=locDct.get((indicesIdx,pair),set())
-            #st.add(indicesCurrNode)
-            #locDct[(indicesIdx,pair)]=locDct.get((indicesIdx,pair),[])  + [indicesCurrNode]
-            indicesCurrNode=indicesCurrNode.nextNode
-
-    print('set up nodes',datetime.datetime.now())
-    
-    cntDct=dict()
-
-    for ky in locDct:
-        i,pair=ky
-        cntDct[pair]=cntDct.get(pair,0) + len(locDct[ky])
-
-    cntTuples=[(p,cntDct[p]) for p in cntDct]
-    cntTuples=sorted(cntTuples,key=lambda x: x[1],reverse=True)
+    #print('numNonSpecialRange ',numNonSpecialRange)
 
     def show(x):
         pair,cnt=x
         print((vocab[pair[0]],vocab[pair[1]],cnt))
-    #print('cntTuples',[show(c) for c in cntTuples[0:10]])
-    
-
+ 
     MINUS_LARGE=-100000
 
-    for n in nonSpecialIndicesList:
-        #print('-----------SECTION')
-        anStr=''
-        
-        while (n != None):
-            anStr=anStr + str(vocab[n.data])
-            n=n.nextNode
-        #print(anStr)
-        #print('---------')
-
     import datetime
-    print('starting------',datetime.datetime.now())
-    print('vocab init is',vocab)
 
-    vals=[v for v in vocab.values()]
-    print('vals are\n',vals)
-    # print('cnt space t:::')
-    # print(vals[32],vals[116])
-    print(cntDct[(32,116)])
+    tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (-item[1],item[0]) )
 
-    kys=[ky for ky in cntDct.keys()]
-    print('kys thro 5',kys[1:5])
-    print('e space:::')
-    print(vals[101],vals[32])
-    print(cntDct[(101,32)])
+    print('init ordered list:'),
+    for t in tokPairOrderedList[0:5]:
+        show(t)
+    print('--------------------')
+    def gt(item1,item2):
+        if (item1[1]==item2[1]):
+            return item1[0] > item2[0]
+        return item1[1] > item2[1]
+
+    tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (-item[1],item[0]))
+
     for mIdx in range(numMerges):
-       #print('MERGE START')
-       #print('cntDct iv is ',cntDct.get((105,118),0))
-       #print('just checking:',vocab[105] + vocab[118])
-       #topPair=cntTuples[0][0]
-       topPair=max(cntDct,key=cntDct.get)
-       #if (mIdx==0):
-           
-       #    print("count for e' ' is ",topPair,cntDct[topPair])
-       #    print('count for space t is ',(vocab[b" "],vocab[b"t"]),cntDct[(vocab[b" "],vocab[b"t"])])
-       if (cntDct[topPair]==0):
+    
+       #topPair=max(cntDct,key=cntDct.get)
+       #if ((vocab[topPair[0]],vocab[topPair[1]])==(b'e',b' ') ):
+       #    del cntDct[topPair]
+       #    topPair=max(cntDct,key=cntDct.get)
+
+       topPair=tokPairOrderedList[0][0]
+
+       #print('&&&&&&&&&&&& topPair is',topPair)
+       if (tokPairCount[topPair]==0):
            continue
-       #cntTuples=cntTuples[1:]#del cntDct[topPair]
-       del cntDct[topPair]#=MINUS_LARGE
+    
+       del tokPairCount[topPair]
+       
        b1=vocab[topPair[0]]
        b2=vocab[topPair[1]]
        newTok=currVocabSize
        vocab[newTok]=b1 + b2
-
-       #if (mIdx < 6):
-       #    print(b1,b2)
-       #    print('------ added %s -----'%(b1+b2))
+       if (mIdx < 10):
+           print('merge %d is '%mIdx,b1+b2)
+    
        merges[mIdx]=(b1,b2)
        currVocabSize=currVocabSize + 1
-              
-       for indicesIdx in range(len(nonSpecialIndicesList)):
-           indices=nonSpecialIndicesList[indicesIdx]
-           locNodes=locDct.get((indicesIdx,topPair),set())
-           if (len(locNodes) !=0):
-               for node in locNodes:
 
-                   node.data=newTok
+       wordsToUpdate=pairToWord[topPair]
 
-                   #if (newTok==256):
-                   #    print('tok 256',b1 + b2)
-                   if (node.nextNode !=None):
-                       node.nextNode=node.nextNode.nextNode
-                                              
-                       #if (newTok==256):
-                       #    print('new nextnode data',node.nextNode.data,vocab[node.nextNode.data])
+       for wordToUpdate in wordsToUpdate:
+           tokList=wordToToks[wordToUpdate]
 
-                       if (node.nextNode != None):
-                           node.nextNode.prevNode=node
-                           beforePairNext=(topPair[1],node.nextNode.data)
+           pairList=[pl for pl in zip(tokList[0:-1],tokList[1:])]
 
-                           #if (not (beforePairNext in cntDct)):
-                           #    print('!!!! ' + str(beforePairNext) + ' is not in cntDct')
-
-                           #print('beforePairNext decrementing ',vocab[beforePairNext[0]],vocab[beforePairNext[1]])
-                           cntDct[beforePairNext]=cntDct.get(beforePairNext,0) - 1
-                           
-                           newPairNext=(node.data,node.nextNode.data)
-
-                           #if (newTok==256):
-                           #    print('newPairNext: ',newPairNext)
-
-                           cntDct[newPairNext]=cntDct.get(newPairNext,0) + 1
-                           locDct[(indicesIdx,newPairNext)]=locDct.get((indicesIdx,newPairNext),[]) + [node]
-                   if (node.prevNode != None):
-                       beforePairPrev=(node.prevNode.data,topPair[0])
-
-                       #if (not (beforePairPrev in cntDct)):
-                       #    print('!!!! ' + str(beforePairPrev) + ' is not in cntDct')
-                       #print('beforePairPrev decrementing ',vocab[beforePairPrev[0]],vocab[beforePairPrev[1]])
-                       
-                       cntDct[beforePairPrev]=cntDct.get(beforePairPrev,0) - 1
- 
-                       newPairPrev=(node.prevNode.data,node.data)
-
-                       #if (newTok==256):
-                       #print('newPairPrev: ',newPairPrev)
-
-                       cntDct[newPairPrev]=cntDct.get(newPairPrev,0) + 1
-                       locDct[(indicesIdx,newPairPrev)]=locDct.get((indicesIdx,newPairPrev),[]) + [node.prevNode]
-                        
-       #for newKy in newCntDct:
-       #    newCntTuple=(newKy,newCntDct[newKy])
-       #    i=0
-       #    numTup=len(cntTuples)
-       #    while ( ( i < numTup) and (cntTuples[i][1] > newCntTuple[1]) ):
-       #        i=i + 1
-       #    if (i==len(cntTuples)):
-       #        cntTuples=cntTuples + [newCntTuple]
-       #    else:
-       #        cntTuples=cntTuples[0:i] + [newCntTuple] + cntTuples[i:]
-                 
+           numPairs=len(pairList)
            
+           for pairIdx in range(numPairs):
+               currPair=pairList[pairIdx]
+
+               if (currPair==topPair):
+                   if (pairIdx > 0):
+                       if ( (pairIdx > 1) and (pairList[pairIdx-2]==topPair) ):
+                           newPair=(newTok,newTok)
+                           tokPairCount[newPair]=tokPairCount.get(newPair,0) + wordCount[wordToUpdate]
+                           if (newPair in pairToWord):
+                               pairToWord[newPair].add(wordToUpdate)
+                           else:
+                               pairToWord[newPair]=set([wordToUpdate])
+                       else:
+                           prevPair=pairList[pairIdx-1]
+                           if (prevPair != topPair):
+                               if (not (prevPair in tokPairCount)):
+                                   print('prevPair not there',(vocab[prevPair[0]],vocab[prevPair[1]]))
+                               
+                                   raise Exception('NO')
+                               tokPairCount[prevPair]=tokPairCount[prevPair] - wordCount[wordToUpdate]
+                    
+                           newPair=(prevPair[0],newTok)
+
+                           tokPairCount[newPair]=tokPairCount.get(newPair,0) + wordCount[wordToUpdate]
+                           if (newPair in pairToWord):
+                               pairToWord[newPair].add(wordToUpdate)
+                           else:
+                               pairToWord[newPair]=set([wordToUpdate])
+                   if (pairIdx < (numPairs-1) ):
+                       nextPair=pairList[pairIdx + 1]
+                       if (nextPair !=topPair):
+                           if (not (nextPair in tokPairCount)):
+                               print('nextPair not there',(vocab[nextPair[0]],vocab[nextPair[1]]))
+                               raise Exception('NONO')
+                           tokPairCount[nextPair]=tokPairCount[nextPair] - wordCount[wordToUpdate]
+                       if ( (pairIdx >= (numPairs-2)) or (pairList[pairIdx +2] != topPair) ):
+                           newPair=(newTok,nextPair[1])
+                           tokPairCount[newPair]=tokPairCount.get(newPair,0) + wordCount[wordToUpdate]
+                           if (newPair in pairToWord):
+                               pairToWord[newPair].add(wordToUpdate)
+                           else:
+                               pairToWord[newPair]=set([wordToUpdate])
+
+           newTokList=[]  
+           tokListLen=len(tokList)
+           idx=0
+           while (idx < tokListLen):
+               if (idx < (tokListLen -1) ):
+                   if ((tokList[idx],tokList[idx+1])==topPair):
+                       newTokList.append(newTok)
+                       idx=idx + 2
+                   else:
+                       newTokList.append(tokList[idx])
+                       idx=idx + 1
+               else:
+                   newTokList.append(tokList[idx])
+                   idx=idx + 1
+                   
+           wordToToks[wordToUpdate]=newTokList 
+ 
+       tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (-item[1],item[0]) )
+
+       if (mIdx < 10):
+           
+           print('now ordered list is')
+           for t in tokPairOrderedList[0:5]:
+               show(t)
+       #toInsert=(newPair,tokPairCount[newPair])
+       #insertLoc=None
+       #for i in range(orderedListLen):
+       #    if (gt(toInsert,tokPairOrderedList[i]) ):
+       #        insertLoc=i
+       #if (insertLoc==None):
+       #    tokPairOrderedList.append(toInsert)
+       #else:
+       #    tokPairOrderedList=tokPairOrderedList[0:i] + [toInsert] + tokPairOrderedList[i:]
+            
+
+                
+                  
     #print('*********** currVocabSize is',currVocabSize)
     #print('vocab_size is ', vocab_size)
     #print('cntDct is',cntDct)
