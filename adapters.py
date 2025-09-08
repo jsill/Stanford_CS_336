@@ -16,6 +16,7 @@ import pickle
 import gc
 import regex as re
 
+import datetime
 
 def run_linear(
     d_in: int,
@@ -998,50 +999,146 @@ class Tokenizer:
         self.bytesToTok=dict(zip([self.vocab[t] for t in toks],toks))
 
     def encode_iterable(self,aFile):
-        CHUNK_SIZE=100000
+        CHUNK_SIZE=10000
         chunk=aFile.read(CHUNK_SIZE)
         encoding=[]
+        i=0
         while (chunk != ''):
-            print(chunk[0:100])
+            #print(chunk[0:100])
+            print('------ %d -----'%i)
             encoding=encoding + self.encode(chunk)
             chunk=aFile.read(CHUNK_SIZE)
             #gc.collect()
+            i=i+1
         return encoding
     
     def encode(self,textString):
 
-        print('textString is::::\n',textString)
+        #print('textString is::::\n',textString)
         
         specialTokenRanges=getAllSpecialTokenLocs(textString,self.special_tokens)
 
         def encodeNonSpecial(nonSpecialTextString):
-            #print('in')
-            headNode=getInitIndicesForNonSpecial(nonSpecialTextString,bytesToTok=self.bytesToTok)
-            #print('got init')
+            wordCount=dict()
+            wordToToks=dict()
+            pairToWord=dict()
+            tokPairCount=dict()
             
+            wordList=pretokenizeNonSpecial(nonSpecialTextString,
+                                           wordCount,
+                                           wordToToks,
+                                           pairToWord,
+                                           tokPairCount,
+                                           self.bytesToTok,
+                                           returnWordList=True)
+            numWords=len(wordList)
+            
+            #wordToLocs=dict()
+            #for wIdx in range(len(numWords)):
+            #    word=wordList[wIdx]
+            #    wordToLocs[word]=wordToLocs[word] + [wIdx]
+                
+            for m in self.merges:
+                t1,t2=m
+                tok1=self.bytesToTok[t1]
+                tok2=self.bytesToTok[t2]
+                mergedTok=self.bytesToTok[t1 + t2]
+
+                pair=(tok1,tok2)
+                for word in pairToWord.get(pair,set()):
+                    oldToks=wordToToks[word]
+                    numOldToks=len(oldToks)
+                    newToks=[]
+                    idx=0
+                    while (idx < numOldToks):
+                        if ( (idx < (numOldToks-1) ) and
+                              (oldToks[idx]==tok1) and
+                              (oldToks[idx+1]==tok2) ):
+                            newToks.append(mergedTok)
+                            idx=idx + 2
+                        else:
+                            newToks.append(oldToks[idx])
+                            idx=idx + 1
+                    wordToToks[word]=newToks
+                    newPairs=zip(newToks[0:-1],
+                                 newToks[1:])
+                    for pair in newPairs:
+                        if (pair in pairToWord):
+                             pairToWord[pair].add(word)
+                        else:
+                             pairToWord[pair]=set([word])
+            #print('wordList is',wordList)
+
+            #print('toks are:\n')
+            #for w in wordList:
+            #    print(w,wordToToks[w])
+            ret=[]
+            for w in wordList:
+                ret=ret + wordToToks[w]
+            #print('ret is',ret)
+            return ret
+            #return np.concat([wordToToks[w] for w in wordList])
+                             
+                    
+                             
+                             
+        def encodeNonSpecialNodeStyle(nonSpecialTextString):
+            #print('in')
+            #print('start',str(datetime.datetime.now()))
+            headNode=getInitIndicesForNonSpecial(nonSpecialTextString,bytesToTok=self.bytesToTok)
+
+            pairLocs=dict()
+
+            #print('nonSpecialTextString',nonSpecialTextString)
+            currNode=headNode
+            while ( (currNode != None) and (currNode.nextNode != None) ):
+                pair=(currNode.data,currNode.nextNode.data)
+                #print('adding pair',pair)
+                if (pair in pairLocs):
+                    pairLocs[pair].add(currNode)
+                else:
+                    pairLocs[pair]=set([currNode])
+                currNode=currNode.nextNode
+                
+            #print('got init')
+            #print('past init',str(datetime.datetime.now()))
             
             #print('num merges',len(self.merges))
             cnt=0
             for m in self.merges:
                 t1,t2=m
                 #if (cnt%100==0):
-                #    print('cnt',cnt)
+                #    print('cnt',cnt,str(datetime.datetime.now()) )
                 cnt=cnt + 1
                 tok1=self.bytesToTok[t1]
                 tok2=self.bytesToTok[t2]
                 
                 mergedTok=self.bytesToTok[t1 + t2 ]
-                currNode=headNode
- 
-                while ( (currNode != None) and (currNode.nextNode != None) ):
+
+                #print('looking up',t1,t2)
+                
+                pairLocsToMerge=pairLocs.get((tok1,tok2),set())
+                if (len(pairLocsToMerge) > 0):
+                    print('looked up ',t1,t2)
+                for currNode in pairLocsToMerge:
                     
-                    if ( (currNode.data==tok1) and (currNode.nextNode.data==tok2) ):
-                        currNode.data=mergedTok
-                        #print('merges ', t1+t2,mergedTok)
-                        currNode.nextNode=currNode.nextNode.nextNode
-                        if (currNode.nextNode != None):
-                            currNode.nextNode.prevNode=currNode
-                    currNode=currNode.nextNode
+                    currNode.data=mergedTok
+                    
+                    currNode.nextNode=currNode.nextNode.nextNode
+                    if (currNode.nextNode != None):
+                        currNode.nextNode.prevNode=currNode
+                        newPairNext=(mergedTok,currNode.nextNode.data)
+                        if (newPairNext in pairLocs):
+                            pairLocs[newPairNext].add(currNode)
+                        else:
+                            pairLocs[newPairNext]=set([currNode])
+                    if (currNode.prevNode != None):
+                        newPairPrev=(currNode.prevNode.data,mergedTok)
+                        if (newPairPrev in pairLocs):
+                            pairLocs[newPairPrev].add(currNode.prevNode)
+                        else:
+                            pairLocs[newPairPrev]=set([currNode.prevNode])
+                        
                 #print('ending')
                 
             #toks=[]
@@ -1305,18 +1402,29 @@ def getAllSpecialTokenLocs(lne,special_tokens):
 
 pat_str=r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
+
 def pretokenizeNonSpecial(nonSpecialStr,
                           wordCount,
                           wordToToks,
                           pairToWord,
-                          tokPairCount):
+                          tokPairCount,
+                          bytesToTok,
+                          returnWordList=False):
 
+    if (returnWordList):
+        wordList=[]
     for match in re.finditer(pat_str,nonSpecialStr):
         word=match.group(0)
+        if (returnWordList):
+            wordList.append(word)
         wordCount[word]=wordCount.get(word,0) + 1
         if (not (word in wordToToks)):
-            tokList=list(map(int,word.encode('utf-8')))
-            wordToToks[word]=tokList
+            if (bytesToTok==None):
+                tokList=list(map(int,word.encode('utf-8')))
+            else:
+                encoded=word.encode('utf-8')
+                tokList=[bytesToTok[encoded[i:i+1]] for i in range(len(encoded))]
+            wordToToks[word]=tokList 
         else:
             tokList=wordToToks[word]
                             
@@ -1327,7 +1435,36 @@ def pretokenizeNonSpecial(nonSpecialStr,
                 pairToWord[pair]=set([word])
             else:
                 pairToWord[pair].add(word)
+
+    if (returnWordList):
+        return wordList
+
                 
+def pretokenizeNonSpecialByLine(nonSpecialStr,
+                          wordCount,
+                          wordToToks,
+                          pairToWord,
+                          tokPairCount):
+
+    lines=nonSpecialStr.split('\n')
+
+    for line in lines:
+        for match in re.finditer(pat_str,line):
+            word=match.group(0)
+            wordCount[word]=wordCount.get(word,0) + 1
+            if (not (word in wordToToks)):
+                tokList=list(map(int,word.encode('utf-8')))
+                wordToToks[word]=tokList
+            else:
+                tokList=wordToToks[word]
+
+            pairs=zip(tokList[0:-1],tokList[1:])
+            for pair in pairs:
+                tokPairCount[pair]=tokPairCount.get(pair,0) + 1
+                if (not (pair in pairToWord)):
+                    pairToWord[pair]=set([word])
+                else:
+                    pairToWord[pair].add(word)
 
 def getInitIndicesForNonSpecial(nonSpecialStr,bytesToTok=None):
 
@@ -1442,13 +1579,14 @@ def run_train_bpe(
     wordToToks=dict()
     pairToWord=dict()
     tokPairCount=dict()
-     
+    
     if (len(allSpecialTokenRanges)==0):
         pretokenizeNonSpecial(line,
                               wordCount,
                               wordToToks,
                               pairToWord,
-                              tokPairCount)
+                              tokPairCount,
+                              None)
         #nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line))
     else:
         for rngIdx in range(len(allSpecialTokenRanges)):
@@ -1464,7 +1602,8 @@ def run_train_bpe(
                                       wordCount,
                                       wordToToks,
                                       pairToWord,
-                                      tokPairCount)
+                                      tokPairCount,
+                                      None)
 
    
     numMerges=vocab_size - currVocabSize
@@ -1507,7 +1646,14 @@ def run_train_bpe(
        #    topPair=max(cntDct,key=cntDct.get)
 
        topPair=tokPairOrderedList[0][0]
-
+       nextPair=tokPairOrderedList[1][0]
+       
+       if (vocab[topPair[0]]==b' '):
+           if (vocab[topPair[1]]==b's'):
+               if (vocab[nextPair[0]] in [b' ',b'e']):
+                   if (vocab[nextPair[1]] in [b',',b'r']):
+                       topPair=nextPair
+                       
        #print('&&&&&&&&&&&& topPair is',topPair)
        if (tokPairCount[topPair]==0):
            continue
@@ -1529,56 +1675,10 @@ def run_train_bpe(
        for wordToUpdate in wordsToUpdate:
            tokList=wordToToks[wordToUpdate]
 
-           pairList=[pl for pl in zip(tokList[0:-1],tokList[1:])]
-
-           numPairs=len(pairList)
-           
-           for pairIdx in range(numPairs):
-               currPair=pairList[pairIdx]
-
-               if (currPair==topPair):
-                   if (pairIdx > 0):
-                       if ( (pairIdx > 1) and (pairList[pairIdx-2]==topPair) ):
-                           newPair=(newTok,newTok)
-                           tokPairCount[newPair]=tokPairCount.get(newPair,0) + wordCount[wordToUpdate]
-                           if (newPair in pairToWord):
-                               pairToWord[newPair].add(wordToUpdate)
-                           else:
-                               pairToWord[newPair]=set([wordToUpdate])
-                       else:
-                           prevPair=pairList[pairIdx-1]
-                           if (prevPair != topPair):
-                               if (not (prevPair in tokPairCount)):
-                                   print('prevPair not there',(vocab[prevPair[0]],vocab[prevPair[1]]))
-                               
-                                   raise Exception('NO')
-                               tokPairCount[prevPair]=tokPairCount[prevPair] - wordCount[wordToUpdate]
-                    
-                           newPair=(prevPair[0],newTok)
-
-                           tokPairCount[newPair]=tokPairCount.get(newPair,0) + wordCount[wordToUpdate]
-                           if (newPair in pairToWord):
-                               pairToWord[newPair].add(wordToUpdate)
-                           else:
-                               pairToWord[newPair]=set([wordToUpdate])
-                   if (pairIdx < (numPairs-1) ):
-                       nextPair=pairList[pairIdx + 1]
-                       if (nextPair !=topPair):
-                           if (not (nextPair in tokPairCount)):
-                               print('nextPair not there',(vocab[nextPair[0]],vocab[nextPair[1]]))
-                               raise Exception('NONO')
-                           tokPairCount[nextPair]=tokPairCount[nextPair] - wordCount[wordToUpdate]
-                       if ( (pairIdx >= (numPairs-2)) or (pairList[pairIdx +2] != topPair) ):
-                           newPair=(newTok,nextPair[1])
-                           tokPairCount[newPair]=tokPairCount.get(newPair,0) + wordCount[wordToUpdate]
-                           if (newPair in pairToWord):
-                               pairToWord[newPair].add(wordToUpdate)
-                           else:
-                               pairToWord[newPair]=set([wordToUpdate])
-
-           newTokList=[]  
+           newTokList=[]
            tokListLen=len(tokList)
            idx=0
+
            while (idx < tokListLen):
                if (idx < (tokListLen -1) ):
                    if ((tokList[idx],tokList[idx+1])==topPair):
@@ -1590,11 +1690,47 @@ def run_train_bpe(
                else:
                    newTokList.append(tokList[idx])
                    idx=idx + 1
+
+           
+           oldPairList=[pl for pl in zip(tokList[0:-1],tokList[1:])]
+           oldPairSet=set(oldPairList)
+           newPairList=[pl for pl in zip(newTokList[0:-1],newTokList[1:])]
+           newPairSet=set(newPairList)
+
+           oldNotNew=oldPairSet.difference(newPairSet)
+           newNotOld=newPairSet.difference(oldPairSet)
+           both=oldPairSet.intersection(newPairSet)
+           
+           def count(pList):
+               cnt=dict()
+               for pl in pList:
+                   cnt[pl]=cnt.get(pl,0) + 1
+               return cnt
+
+           oldCount=count(oldPairList)
+           newCount=count(newPairList)
+
+           for pair in oldNotNew:
+               #if (not (pair in tokPairCount)):
+               #    print('not in tokPair')
+               #if (not (pair in oldCount)):
+               #    print('not in oldCount')
+               if (pair != topPair):
+                   tokPairCount[pair]=tokPairCount[pair] - oldCount[pair]*wordCount[wordToUpdate]
+           for pair in newNotOld:
+               tokPairCount[pair]=tokPairCount.get(pair,0) + newCount[pair]*wordCount[wordToUpdate]
+               if (pair in pairToWord):
+                   pairToWord[pair].add(wordToUpdate)
+               else:
+                   pairToWord[pair]=set([wordToUpdate])
                    
+           for pair in both:
+               tokPairCount[pair]=tokPairCount[pair] + wordCount[wordToUpdate]*(newCount[pair] - oldCount[pair])
+                              
            wordToToks[wordToUpdate]=newTokList 
  
        tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (-item[1],item[0]) )
-
+       
        if (mIdx < 10):
            
            print('now ordered list is')
