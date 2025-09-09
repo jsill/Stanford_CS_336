@@ -954,9 +954,11 @@ def run_save_checkpoint(
     
     mod=pickle.dumps(model.state_dict())
     opt=pickle.dumps(optimizer.state_dict())
-    
-    pickle.dump((mod,opt,iteration),open(fName,'wb'))
-    return fName
+
+    dct={'model_state':model.state_dict(),
+         'optimizer_state':optimizer.state_dict(),
+         'iteration':iteration}
+    torch.save(dct,out)
 
 
 
@@ -978,10 +980,11 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    mod_state_dict,opt_state_dict,iterNum=pickle.load(open(src,'rb'))
-    model.load_state_dict(mod_state_dict) 
-    optimizer.load_state_dict(opt_state_dict)
+    dct=torch.load(src)
     
+    model.load_state_dict(dct['model_state']) 
+    optimizer.load_state_dict(dct['optimizer_state'])
+    return dct['iteration']
     #raise NotImplementedError
 
 
@@ -989,12 +992,14 @@ def run_load_checkpoint(
 class Tokenizer:
 
     def __init__(self,vocab,merges,special_tokens):
+        
         self.vocab=vocab
         self.merges=merges
         self.special_tokens=special_tokens
 
         self.maxByteLen=max([len(val) for val in self.vocab.values()])
 
+        
         toks=[ky for ky in self.vocab]
         self.bytesToTok=dict(zip([self.vocab[t] for t in toks],toks))
 
@@ -1023,7 +1028,8 @@ class Tokenizer:
             wordToToks=dict()
             pairToWord=dict()
             tokPairCount=dict()
-            
+
+        
             wordList=pretokenizeNonSpecial(nonSpecialTextString,
                                            wordCount,
                                            wordToToks,
@@ -1037,8 +1043,9 @@ class Tokenizer:
             #for wIdx in range(len(numWords)):
             #    word=wordList[wIdx]
             #    wordToLocs[word]=wordToLocs[word] + [wIdx]
-                
-            for m in self.merges:
+
+            cnt=1
+            for m in self.merges:        
                 t1,t2=m
                 tok1=self.bytesToTok[t1]
                 tok2=self.bytesToTok[t2]
@@ -1072,6 +1079,7 @@ class Tokenizer:
             #print('toks are:\n')
             #for w in wordList:
             #    print(w,wordToToks[w])
+
             ret=[]
             for w in wordList:
                 ret=ret + wordToToks[w]
