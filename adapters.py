@@ -569,7 +569,14 @@ def run_transformer_lm(
         next-word distribution for each token.
     """
 
-
+    print('context_length',context_length)
+    print('in_indices shape',in_indices.shape)
+    print('d_model',d_model)
+    print('d_ff',d_ff)
+    print('vocab_size',vocab_size)
+    print('num_layers',num_layers)
+    print('num_heads',num_heads)
+    
     layerOutput=run_embedding(vocab_size,d_model,weights['token_embeddings.weight'],
                               in_indices)
     
@@ -1546,7 +1553,7 @@ def run_train_bpe(
     """
 
     
-    print('special tokens are',special_tokens)
+    #print('special tokens are',special_tokens)
     #print('vocab_size is ',vocab_size)
 
     import datetime
@@ -1560,18 +1567,18 @@ def run_train_bpe(
         currVocabSize=currVocabSize + 1
 
 
-    content=open(input_path,'r').read().lower()
+    content=open(input_path,'r').read()
 
-    for sTok in special_tokens:
-        content=content.replace(sTok,'')
-    print('done replacing')
+    #for sTok in special_tokens:
+    #    content=content.replace(sTok,'')
+    #print('done replacing')
     #print('content is',content[0:30000])
 
     #content2=content.replace('e ','')
     
-    print('e space count',len(content.split('e ')))
-    print('space t count',len(content.split(' t')))
-    print('in count',len(content.split('in')))
+    #print('e space count',len(content.split('e ')))
+    #print('space t count',len(content.split(' t')))
+    #print('in count',len(content.split('in')))
     #raise Exception('done')
     #print('read it',datetime.datetime.now())
     
@@ -1581,7 +1588,7 @@ def run_train_bpe(
     
     allSpecialTokenRanges=getAllSpecialTokenLocs(line,special_tokens)
 
-    print('got special',datetime.datetime.now())
+    #print('got special',datetime.datetime.now())
 
     wordCount=dict()
     wordToToks=dict()
@@ -1618,7 +1625,7 @@ def run_train_bpe(
  
     merges=[None]*numMerges
 
-    print('made merges',datetime.datetime.now())
+    
      
     #numNonSpecial=len(nonSpecialIndicesList)
     #numNonSpecialRange=range(numNonSpecial)
@@ -1631,21 +1638,23 @@ def run_train_bpe(
  
     MINUS_LARGE=-100000
 
-    import datetime
 
-    tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (-item[1],item[0]) )
 
-    print('init ordered list:'),
-    for t in tokPairOrderedList[0:5]:
-        show(t)
-    print('--------------------')
+    tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (item[1],(vocab[item[0][0]],vocab[item[0][1]]) ) ,reverse=True)
+                                                                     #item[0]) )
+
+    #print('init ordered list:'),
+    #for t in tokPairOrderedList[0:5]:
+    #    show(t)
+    #print('--------------------')
+    
     def gt(item1,item2):
         if (item1[1]==item2[1]):
             return item1[0] > item2[0]
         return item1[1] > item2[1]
 
-    tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (-item[1],item[0]))
-
+    #tokPairOrderedList=sorted(tokPairCount.items(),key=gt)
+    print('I made merges',datetime.datetime.now())
     for mIdx in range(numMerges):
     
        #topPair=max(cntDct,key=cntDct.get)
@@ -1654,15 +1663,32 @@ def run_train_bpe(
        #    topPair=max(cntDct,key=cntDct.get)
 
        topPair=tokPairOrderedList[0][0]
-       nextPair=tokPairOrderedList[1][0]
-       
+
        if (vocab[topPair[0]]==b' '):
-           if (vocab[topPair[1]]==b's'):
-               if (vocab[nextPair[0]] in [b' ',b'e']):
-                   if (vocab[nextPair[1]] in [b',',b'r']):
-                       topPair=nextPair
+           if (vocab[topPair[1]]==b'd'):
+               print('top pair is space d, count:')
+               print(tokPairCount[topPair])
+               print(tokPairOrderedList[0])
+               print(tokPairOrderedList[1])
+
+               bp1=(vocab[topPair[0]],vocab[topPair[1]])
+               bp2=(vocab[tokPairOrderedList[1][0][0]],vocab[tokPairOrderedList[1][0][1]])
+               print('bp1',bp1)
+               print('bp2',bp2)
+               print('is bp1 > bp2??',bp1 > bp2)
+               print('--------------------------------------')
+               
+       
+       #nextPair=tokPairOrderedList[1][0]
+       
+       #if (vocab[topPair[0]]==b' '):
+       #    if (vocab[topPair[1]]==b's'):
+       #        if (vocab[nextPair[0]] in [b' ',b'e']):
+       #            if (vocab[nextPair[1]] in [b',',b'r']):
+       #                topPair=nextPair
                        
        #print('&&&&&&&&&&&& topPair is',topPair)
+       
        if (tokPairCount[topPair]==0):
            continue
     
@@ -1672,6 +1698,7 @@ def run_train_bpe(
        b2=vocab[topPair[1]]
        newTok=currVocabSize
        vocab[newTok]=b1 + b2
+       
        if (mIdx < 10):
            print('merge %d is '%mIdx,b1+b2)
     
@@ -1685,6 +1712,7 @@ def run_train_bpe(
 
            newTokList=[]
            tokListLen=len(tokList)
+           
            idx=0
 
            while (idx < tokListLen):
@@ -1737,13 +1765,15 @@ def run_train_bpe(
                               
            wordToToks[wordToUpdate]=newTokList 
  
-       tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (-item[1],item[0]) )
+       tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (item[1], (vocab[item[0][0]]),vocab[item[0][1]] ),reverse=True)
+                                                                        #item[0]) )
+
        
-       if (mIdx < 10):
+       #if (mIdx < 10):
            
-           print('now ordered list is')
-           for t in tokPairOrderedList[0:5]:
-               show(t)
+       #    print('now ordered list is')
+       #    for t in tokPairOrderedList[0:5]:
+       #        show(t)
        #toInsert=(newPair,tokPairCount[newPair])
        #insertLoc=None
        #for i in range(orderedListLen):
