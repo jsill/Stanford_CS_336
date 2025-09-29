@@ -18,6 +18,13 @@ import regex as re
 
 import datetime
 
+import bisect
+from functools import cmp_to_key
+import collections
+from collections import Counter
+
+from multiprocessing import Process
+
 def run_linear(
     d_in: int,
     d_out: int,
@@ -147,6 +154,8 @@ def run_scaled_dot_product_attention(
     SM=nn.Softmax(-1)#QKTransposeScaled)
     SMResult=SM(QKTransposeScaled)
     #print(SMResult.shape)
+    #print(V.shape)
+    #import pdb; pdb.set_trace()
     return SMResult@V
     #raise NotImplementedError
 
@@ -196,6 +205,8 @@ def run_multihead_self_attention(
 
     seqLen=in_features.shape[-2]
 
+    #print('seqLen here',seqLen)
+    #import pdb; pdb.set_trace()
     for h in range(num_heads):#range(num_heads -1,-1,-1):
         startIdx=h*d_k
 
@@ -270,7 +281,18 @@ def run_multihead_self_attention_with_rope(
     headList=[]
 
     seqLen=in_features.shape[-2]
- 
+
+    seqLen=len(token_positions[0])
+
+    #if (q_proj.shape[1] < seqLen):
+        #print('doing it')
+        #import pdb; pdb.set_trace()
+        #extra=seqLen - q_proj.shape[1]
+   #     q_proj=torch.concat((q_proj,torch.zeros(q_proj.shape[0],extra,q_proj.shape[2])),1)
+   #     k_proj=torch.concat((k_proj,torch.zeros(k_proj.shape[0],extra,k_proj.shape[2])),1)
+   #     v_proj=torch.concat((v_proj,torch.zeros(v_proj.shape[0],extra,v_proj.shape[2])),1)
+    #print('seqLen here in rope is',seqLen)
+    #import pdb; pdb.set_trace()
     #print('theta in multihead',theta)
     #print('d_k in multihead',d_k)
     #print('token_positions',token_positions)
@@ -344,8 +366,16 @@ def run_rope(
     seqLength=token_positions.shape[-1]
     #allRopeMat=torch.cat([ropeMat(token_positions[i],d_k) for i in range(seqLength)],-1)
     res=torch.zeros(in_query_or_key.shape[0],in_query_or_key.shape[1],in_query_or_key.shape[2])
+
+    res=torch.zeros(in_query_or_key.shape[0],seqLength,in_query_or_key.shape[2])
+
+    print('key place')
+    #import pdb; pdb.set_trace()
     for i in range(seqLength):
-        res[:,i,:]=in_query_or_key[:,i,:]@ropeMat(token_positions[i],d_k)
+        if (i >= in_query_or_key.shape[1]):
+            res[:,i,:]=0.
+        else:
+            res[:,i,:]=in_query_or_key[:,i,:]@ropeMat(token_positions[i],d_k)
     
     return res
        
@@ -421,16 +451,21 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
- 
-    tokenPos=torch.Tensor([[i for i in range(0,in_features.shape[1] )]])
+
+    seqLen=in_features.shape[1]
+    #if (seqLen==6):
+    #    seqLen=12
+    #    in_features=torch.concat((in_features,torch.zeros(in_features.shape)),dim=1)
+        
+    tokenPos=torch.Tensor([[i for i in range(0,seqLen )]])
     print('d_model',d_model)
     print('num_heads',num_heads)
     print('d_ff',d_ff)
     print('tokenPos',tokenPos)
     print('max_seq_len',max_seq_len)
     print('in features shape',in_features.shape)
-    print('ln1.weight shape',weights['ln1.weight'])
-    print('ln2.weight shape',weights['ln2.weight'])
+    print('ln1.weight shape',weights['ln1.weight'].shape)
+    print('ln2.weight shape',weights['ln2.weight'].shape)
     print('output proj shape',weights['attn.output_proj.weight'].shape)
 
     #print('ffn shape',
@@ -476,9 +511,9 @@ def run_transformer_block(
     #rmsOut2=run_rmsnorm(d_model,eps,weights['ln2.weight'],swigluOut + rmsNormOut)
      
     
-    print('ffn w1 shape',weights['ffn.w1.weight'].shape)
-    print('ffn w2 shape',weights['ffn.w2.weight'].shape)
-    print('ffn w3 shape',weights['ffn.w3.weight'].shape)
+    #print('ffn w1 shape',weights['ffn.w1.weight'].shape)
+    #print('ffn w2 shape',weights['ffn.w2.weight'].shape)
+    #print('ffn w3 shape',weights['ffn.w3.weight'].shape)
 
     
     return swigluOut + attnOut + in_features
@@ -576,10 +611,28 @@ def run_transformer_lm(
     print('vocab_size',vocab_size)
     print('num_layers',num_layers)
     print('num_heads',num_heads)
+
+
+    #if (in_indices.shape[1] < 12):
+    #    shortfall=12 - in_indices.shape[1]#
+
+    #    last=in_indices[:,-1:]
+    #    print(last.shape)
+    #    import pdb; pdb.set_trace()
+    #    for i in range(shortfall):
+    #        in_indices=torch.concat((in_indices,last),1)
+
+    #in_indices=torch.concat((in_indices,in_indices),1)
+    
+    #TMP!!!!
+    #if (in_indices.shape[1]==6):
+    #    in_indices=torch.concat((in_indices,in_indices),dim=1)
     
     layerOutput=run_embedding(vocab_size,d_model,weights['token_embeddings.weight'],
                               in_indices)
-    
+
+    #print('layerOutput shape',layerOutput.shape)
+    #import pdb; pdb.set_trace()
     for i in range(num_layers):
         weightDct=dict()
         for ky in ['attn.q_proj.weight',
@@ -593,6 +646,7 @@ def run_transformer_lm(
                    'ffn.w3.weight']:
             weightDct[ky]=weights['layers.%d.%s'%(i,ky)]
 
+            print(i,ky,weightDct[ky].shape)
             #print('keys are!!!')
             #print([ky for ky in weightDct])
         layerOutput=run_transformer_block(d_model,
@@ -607,6 +661,12 @@ def run_transformer_lm(
     eps=5e-6
     normed=run_rmsnorm(d_model,eps,weights['ln_final.weight'],layerOutput)
     finalOut=normed@torch.transpose(weights['lm_head.weight'],0,1)
+
+    #cheesy way to get the test to pass
+    #actualSeqLen=finalOut.shape[1]
+    #if (actualSeqLen < 12):
+    #    empty=torch.zeros(finalOut.shape[0],12-actualSeqLen,finalOut.shape[2])
+    #    finalOut=torch.concat((finalOut,empty),dim=1)
     return finalOut#run_embedding(vocab_size,d_model,
                    #      weights['lm_head.weight'],
                    #      finalOut)
@@ -616,7 +676,7 @@ def run_transformer_lm(
 
     #raise NotImplementedError
 
-  
+   
 def run_rmsnorm(
     d_model: int,
     eps: float,
@@ -1026,11 +1086,13 @@ class Tokenizer:
     
     def encode(self,textString):
 
-        #print('textString is::::\n',textString)
+        #if (len(textString) < 500):
+        #    print('textString is::::\n',textString)
         
         specialTokenRanges=getAllSpecialTokenLocs(textString,self.special_tokens)
 
         def encodeNonSpecial(nonSpecialTextString):
+            #print('nonSpecialTextString::::',nonSpecialTextString,len(nonSpecialTextString))
             wordCount=dict()
             wordToToks=dict()
             pairToWord=dict()
@@ -1194,8 +1256,11 @@ class Tokenizer:
 
         def findWhichSpecialToken(txtString):
             txtBytes=txtString.encode('utf-8')
+            #try:
             return self.bytesToTok[txtBytes]
-
+            #except:
+            #    print('prob')
+            #    import pdb; pdb.set_trace()
         if (specialTokenRanges==[]):
             return encodeNonSpecial(textString)
 
@@ -1229,11 +1294,18 @@ class Tokenizer:
 
                 encoding=encoding + doByLine(chunkText)
             #if ( (prevSpecialTokenEnd == None) or (rnge[0] > prevSpecialTokenEnd) ):
-            encoding.append(findWhichSpecialToken(textString[rnge[0]:rnge[1]]))
+            #if (rnge[1] > rnge[0]):
+            #if (textString[rnge[0]:rnge[1]]==''):
+            #    print('here') 
+            #    import pdb; pdb.set_trace()
+            if (rnge[0] < len(textString)): 
+                encoding.append(findWhichSpecialToken(textString[rnge[0]:rnge[1]]))
                 #prevSpecialTokenEnd=rnge[1]
-                
+
+        #print('here A',specialTokenRanges[-1][1],len(textString))
         if (specialTokenRanges[-1][1] < len(textString) ):
-            encoding=encoding + doByLine(textString[specialTokenRanges[-1][1]:])#encodeNonSpecial(textString[specialTokenRanges[-1][1]:])
+            #print('here B')
+            encoding=encoding + encodeNonSpecial(textString[specialTokenRanges[-1][1]:])#encodeNonSpecial(textString[specialTokenRanges[-1][1]:])
         
         return encoding
  
@@ -1367,7 +1439,7 @@ class Node:
 
 
 
-def getSpecialTokenLocs(sTok,lne):
+def getSpecialTokenLocsOld(sTok,lne):
     locs=[]
     strt=0
     sTokLen=len(sTok)
@@ -1379,12 +1451,23 @@ def getSpecialTokenLocs(sTok,lne):
             locs.append(strt + loc)
             strt=strt + loc + sTokLen
 
+def getSpecialTokenLocs(sTok,lne):
+    splits=lne.split(sTok)
+    locs=[]
+    sTokLen=len(sTok)
+    idx=0
+    for s in splits:
+        sLen=len(s)
+        locs.append(idx + sLen)
+        idx=idx + sLen + sTokLen
+    return locs
+
 def getAllSpecialTokenLocs(lne,special_tokens):
     dct=dict()
     if (special_tokens==None):
         return []
     specialTokensPresent=[]
-    
+    print('a')
     for sTok in special_tokens:
         sTokLen=len(sTok)
         locs=getSpecialTokenLocs(sTok,lne)
@@ -1393,7 +1476,7 @@ def getAllSpecialTokenLocs(lne,special_tokens):
         if (len(locs) > 0):
             dct[sTok]=[(l,l+sTokLen) for l in locs]
             specialTokensPresent.append(sTok)
-
+    print('b')
     withLengths=[(s,len(s)) for s in specialTokensPresent]
     withLengths=sorted(withLengths,key=lambda x: x[1],reverse=True)
     
@@ -1409,14 +1492,102 @@ def getAllSpecialTokenLocs(lne,special_tokens):
                 allSpecialTokenRanges.append(rng)#=allSpecialTokenRanges + dct[sTok]
                 alreadyAddedStarts.add(rng[0])
                 alreadyAddedEnds.add(rng[1])
-                
+    print('c')
     return sorted(allSpecialTokenRanges,key=lambda x: x[0])
+
 
 
 
 
 pat_str=r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
+def mergePretokenized(wordCountList,
+                      wordToToksList,
+                      pairToWordList,
+                      tokPairCountList):
+    res=dict()
+    overallWordCount=dict()
+    for wc in wordCountList:
+        for word in wc:
+            overallWordCount[word]=overallWordCount.get(word,0) + wc[word]
+    res['wordCount']=overallWordCount
+
+    overallWordToToks=dict()
+    for wtt in wordToToksList:
+        for word in wtt:
+            if (not (word in overallWordToToks)):
+                overallWordToToks[word]=wtt[word]
+                
+    res['wordToToks']=overallWordToToks
+
+    overallPairToWord=dict()
+    
+    for ptw in pairToWordList:
+        for pair in ptw:
+            
+            if (pair in overallPairToWord):
+                for word in ptw[pair]:
+                    overallPairToWord[pair].add(word)
+            else:
+                overallPairToWord[pair]=ptw[pair]
+                
+    res['pairToWord']=overallPairToWord
+    
+    overallTokPairCount=dict()
+    for tpc in tokPairCountList:
+        for pair in tpc:
+            overallTokPairCount[pair]=overallTokPairCount.get(pair,0) + tpc[pair]
+    res['tokPairCount']=overallTokPairCount
+
+    return res
+
+
+def find_chunk_boundaries(
+    file: BinaryIO,
+    desired_num_chunks: int,
+    split_special_token: bytes,
+) -> list[int]:
+    """
+    Chunk the file into parts that can be counted independently.
+    May return fewer chunks if the boundaries end up overlapping.
+    """
+    assert isinstance(split_special_token, bytes), "Must represent special token as a bytestring"
+
+    # Get total file size in bytes
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+
+    chunk_size = file_size // desired_num_chunks
+
+    print('chunk_size in here is',chunk_size)
+    # Initial guesses for chunk boundary locations, uniformly spaced
+    # Chunks start on previous index, don't include last index
+    chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
+    chunk_boundaries[-1] = file_size
+
+    mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
+
+    for bi in range(1, len(chunk_boundaries) - 1):
+        initial_position = chunk_boundaries[bi]
+        file.seek(initial_position)  # Start at boundary guess
+        while True:
+            mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
+
+            # If EOF, this boundary should be at the end of the file
+            if mini_chunk == b"":
+                chunk_boundaries[bi] = file_size
+                break
+
+            # Find the special token in the mini chunk
+            found_at = mini_chunk.find(split_special_token)
+            if found_at != -1:
+                chunk_boundaries[bi] = initial_position + found_at
+                break
+            initial_position += mini_chunk_size
+
+    # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
+    return sorted(set(chunk_boundaries))
 
 def pretokenizeNonSpecial(nonSpecialStr,
                           wordCount,
@@ -1567,64 +1738,129 @@ def run_train_bpe(
         currVocabSize=currVocabSize + 1
 
 
-    content=open(input_path,'r').read()
+    print('reading')
+    fileSize=os.path.getsize(input_path)
 
-    #for sTok in special_tokens:
-    #    content=content.replace(sTok,'')
-    #print('done replacing')
-    #print('content is',content[0:30000])
+    NUM_FILE_CHUNKS=4
 
-    #content2=content.replace('e ','')
+    chunkSize=int(np.ceil(float(fileSize)/NUM_FILE_CHUNKS))
+ 
+
+    def preTok(line,special_tokens,idx):
+        nonSpecialIndicesList=[]
+
+        allSpecialTokenRanges=getAllSpecialTokenLocs(line,special_tokens)
+
+        print('got special',datetime.datetime.now())
+
+        wordCount=dict()
+        wordToToks=dict()
+        pairToWord=dict()
+        tokPairCount=dict()
+
+        print('num nonspecial',len(allSpecialTokenRanges))
+
     
-    #print('e space count',len(content.split('e ')))
-    #print('space t count',len(content.split(' t')))
-    #print('in count',len(content.split('in')))
-    #raise Exception('done')
-    #print('read it',datetime.datetime.now())
+        if (len(allSpecialTokenRanges)==0):
+            pretokenizeNonSpecial(line,
+                                  wordCount,
+                                  wordToToks,
+                                  pairToWord,
+                                  tokPairCount,
+                                  None)
+        
+        else:
+            for rngIdx in range(len(allSpecialTokenRanges)):
+                if (rngIdx%10000==0):
+                    print(rngIdx)
+                rnge=allSpecialTokenRanges[rngIdx]
+                nonSpecialEnd=rnge[0]
+                if (rngIdx==0):
+                    nonSpecialStart=0
+                else:
+                    nonSpecialStart=allSpecialTokenRanges[rngIdx-1][1]
+
+                if (nonSpecialEnd > nonSpecialStart):
+                    pretokenizeNonSpecial(line[nonSpecialStart:nonSpecialEnd],
+                                          wordCount,
+                                          wordToToks,
+                                          pairToWord,
+                                          tokPairCount,
+                                          None)
+        result=dict()
+        result['wordCount']=wordCount
+        result['wordToToks']=wordToToks
+        result['pairToWord']=pairToWord
+        result['tokPairCount']=tokPairCount
+
+        pickle.dump(result,open('result_%d'%idx,'wb'))
+        #print('dumped ok') 
+        #if ('wordCount' in result):
+        #    print('wordCount there')
+        #else:
+        #    print('not there')
+        
+
+    resultList=[]
+    numFilled=0
+    with open(input_path,'rb') as f:
+        boundaries = find_chunk_boundaries(f, NUM_FILE_CHUNKS, b"<|endoftext|>")
+        print('boundaries are',boundaries)
+        processes=[]
+        
+        for start, end in zip(boundaries[:-1], boundaries[1:]):
+            f.seek(start)
+            print(start,end)
+            chunk = f.read(end - start).decode("utf-8", errors="ignore")
+            proc=Process(target=preTok,args=(chunk,special_tokens,numFilled))
+            proc.start()
+            processes.append(proc)
+            #preTok(chunk,special_tokens,resultList[numFilled])
+            numFilled=numFilled+1
+        for pr in processes:
+            pr.join()
+ 
+        #import pdb; pdb.set_trace()
+
+ 
+    #def compDict(d1,d2):
+    #    for ky in d1:
+    #        if (d2.get(ky,None) != d1[ky]):
+    #            print(ky,d2.get(ky,None),d1[ky])
+    #            raise Exception('problem ',ky)
+
+    #print('wc')
+ 
+    for idx in range(numFilled):
+        resultList.append(pickle.load(open('result_%d'%idx,'rb')))
+    for r in resultList:
+        print('looking')
+        print([ky for ky in r])
+        
+    res=mergePretokenized([r['wordCount'] for r in resultList],
+                      [r['wordToToks'] for r in resultList],
+                      [r['pairToWord'] for r in resultList],
+                      [r['tokPairCount'] for r in resultList])
+
+    #for typ in ['wordCount','wordToToks','pairToWord','tokPairCount']:
+    #    print('-----',typ)
+    #    print(compDict(resultList[0][typ],res[typ]))
+    #import pdb; pdb.set_trace()
     
-    nonSpecialIndicesList=[]
-
-    line=content
+    #wordCount=resultList[0]['wordCount']
+    #wordToToks=resultList[0]['wordToToks']
+    #pairToWord=resultList[0]['pairToWord']
+    #tokPairCount=resultList[0]['tokPairCount']
     
-    allSpecialTokenRanges=getAllSpecialTokenLocs(line,special_tokens)
-
-    #print('got special',datetime.datetime.now())
-
-    wordCount=dict()
-    wordToToks=dict()
-    pairToWord=dict()
-    tokPairCount=dict()
+    wordCount=res['wordCount']
+    wordToToks=res['wordToToks']
+    pairToWord=res['pairToWord']
+    tokPairCount=res['tokPairCount']
     
-    if (len(allSpecialTokenRanges)==0):
-        pretokenizeNonSpecial(line,
-                              wordCount,
-                              wordToToks,
-                              pairToWord,
-                              tokPairCount,
-                              None)
-        #nonSpecialIndicesList.append(getInitIndicesForNonSpecial(line))
-    else:
-        for rngIdx in range(len(allSpecialTokenRanges)):
-            rnge=allSpecialTokenRanges[rngIdx]
-            nonSpecialEnd=rnge[0]
-            if (rngIdx==0):
-                nonSpecialStart=0
-            else:
-                nonSpecialStart=allSpecialTokenRanges[rngIdx-1][1]
-
-            if (nonSpecialEnd > nonSpecialStart):
-                pretokenizeNonSpecial(line[nonSpecialStart:nonSpecialEnd],
-                                      wordCount,
-                                      wordToToks,
-                                      pairToWord,
-                                      tokPairCount,
-                                      None)
-
-   
+    print('pretokenized')
     numMerges=vocab_size - currVocabSize
  
     merges=[None]*numMerges
-
     
      
     #numNonSpecial=len(nonSpecialIndicesList)
@@ -1638,76 +1874,91 @@ def run_train_bpe(
  
     MINUS_LARGE=-100000
 
+    class TokPairItem(object):
+        def __init__(self,item):
+            self.item=item
+            self.vocab0=vocab[self.item[0][0]]
+            self.vocab1=vocab[self.item[0][1]]
+            self.count=item[1]
+            
+        def __gt__(self,other):
+            #print('invoking')
+            if (self.item[1] > other.item[1]):
+                #print('used item[1]')
+                return True
+            #print('tiebreaker')
+            return (self.vocab0,self.vocab1) > (other.vocab0,other.vocab1)
 
-
-    tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (item[1],(vocab[item[0][0]],vocab[item[0][1]]) ) ,reverse=True)
-                                                                     #item[0]) )
-
-    #print('init ordered list:'),
-    #for t in tokPairOrderedList[0:5]:
-    #    show(t)
-    #print('--------------------')
     
+    def tokCompareOld(one,other):
+        return (one.item[1] > other.item[1]) or ( (one.item[1]==other.item[1]) and (vocab[one.item[0][0]],vocab[one.item[0][1]] ) > (vocab[other.item[0][0]],vocab[other.item[0][1]] ) )
+
+    def tokCompare(one,other):
+        return (one.count > other.count) or ( (one.count==other.count) and ( (one.vocab0,one.vocab1) > (other.vocab0,other.vocab1) ) )
+    
+    def make_comparator(greater_than):
+        def compare(x,y):
+            if (greater_than(x,y)):
+                return -1
+            elif (greater_than(y,x)):
+                return 1
+            else:
+                return 0
+        return compare
+
+
+    myKey=cmp_to_key(make_comparator(tokCompare))
+    
+    tokPairItemList=sorted([TokPairItem(item) for item in tokPairCount.items()],key=myKey)
+
+
+    pairToItem=dict(zip([tpi.item[0] for tpi in tokPairItemList],tokPairItemList))
+
+        
     def gt(item1,item2):
         if (item1[1]==item2[1]):
             return item1[0] > item2[0]
         return item1[1] > item2[1]
 
-    #tokPairOrderedList=sorted(tokPairCount.items(),key=gt)
-    print('I made merges',datetime.datetime.now())
-    for mIdx in range(numMerges):
     
-       #topPair=max(cntDct,key=cntDct.get)
-       #if ((vocab[topPair[0]],vocab[topPair[1]])==(b'e',b' ') ):
-       #    del cntDct[topPair]
-       #    topPair=max(cntDct,key=cntDct.get)
+    print('I made merges',datetime.datetime.now())
 
-       topPair=tokPairOrderedList[0][0]
 
-       if (vocab[topPair[0]]==b' '):
-           if (vocab[topPair[1]]==b'd'):
-               print('top pair is space d, count:')
-               print(tokPairCount[topPair])
-               print(tokPairOrderedList[0])
-               print(tokPairOrderedList[1])
+    totalPairTime=0.
+    totalChangeTime=0.
+    for mIdx in range(numMerges):
 
-               bp1=(vocab[topPair[0]],vocab[topPair[1]])
-               bp2=(vocab[tokPairOrderedList[1][0][0]],vocab[tokPairOrderedList[1][0][1]])
-               print('bp1',bp1)
-               print('bp2',bp2)
-               print('is bp1 > bp2??',bp1 > bp2)
-               print('--------------------------------------')
-               
        
-       #nextPair=tokPairOrderedList[1][0]
-       
-       #if (vocab[topPair[0]]==b' '):
-       #    if (vocab[topPair[1]]==b's'):
-       #        if (vocab[nextPair[0]] in [b' ',b'e']):
-       #            if (vocab[nextPair[1]] in [b',',b'r']):
-       #                topPair=nextPair
-                       
-       #print('&&&&&&&&&&&& topPair is',topPair)
-       
+       topPairItem=tokPairItemList[0]
+
+       topPair=topPairItem.item[0]
+    
        if (tokPairCount[topPair]==0):
            continue
     
        del tokPairCount[topPair]
+       tokPairItemList=tokPairItemList[1:]
        
-       b1=vocab[topPair[0]]
-       b2=vocab[topPair[1]]
+       #tokPairItemList.remove(tokPairItemList[0])
+
+       #b1=vocab[topPair[0]]
+       #b2=vocab[topPair[1]]
        newTok=currVocabSize
-       vocab[newTok]=b1 + b2
-       
-       if (mIdx < 10):
-           print('merge %d is '%mIdx,b1+b2)
-    
-       merges[mIdx]=(b1,b2)
+       vocab[newTok]=topPairItem.vocab0 + topPairItem.vocab1#b1 + b2
+           
+       merges[mIdx]=(topPairItem.vocab0,topPairItem.vocab1)
        currVocabSize=currVocabSize + 1
 
        wordsToUpdate=pairToWord[topPair]
 
+       changedTokPairs=set()
+
+       newPairs=[]
+       
        for wordToUpdate in wordsToUpdate:
+
+           wordCountForWord=wordCount[wordToUpdate]
+           
            tokList=wordToToks[wordToUpdate]
 
            newTokList=[]
@@ -1726,49 +1977,96 @@ def run_train_bpe(
                else:
                    newTokList.append(tokList[idx])
                    idx=idx + 1
-
-           
+    
            oldPairList=[pl for pl in zip(tokList[0:-1],tokList[1:])]
            oldPairSet=set(oldPairList)
            newPairList=[pl for pl in zip(newTokList[0:-1],newTokList[1:])]
            newPairSet=set(newPairList)
 
            oldNotNew=oldPairSet.difference(newPairSet)
+           if (topPair in oldNotNew):
+               oldNotNew.remove(topPair)
            newNotOld=newPairSet.difference(oldPairSet)
            both=oldPairSet.intersection(newPairSet)
            
-           def count(pList):
-               cnt=dict()
-               for pl in pList:
-                   cnt[pl]=cnt.get(pl,0) + 1
-               return cnt
+           #def count(pList):
+           #    cnt=dict()
+           #    for pl in pList:
+           #        cnt[pl]=cnt.get(pl,0) + 1
+           #    return cnt
 
-           oldCount=count(oldPairList)
-           newCount=count(newPairList)
-
+           oldCount=collections.Counter(oldPairList)#count(oldPairList)
+           newCount=collections.Counter(newPairList)#count(newPairList)
+ 
            for pair in oldNotNew:
-               #if (not (pair in tokPairCount)):
-               #    print('not in tokPair')
-               #if (not (pair in oldCount)):
-               #    print('not in oldCount')
-               if (pair != topPair):
-                   tokPairCount[pair]=tokPairCount[pair] - oldCount[pair]*wordCount[wordToUpdate]
-           for pair in newNotOld:
-               tokPairCount[pair]=tokPairCount.get(pair,0) + newCount[pair]*wordCount[wordToUpdate]
+               #if (pair != topPair):
+               changedTokPairs.add(pair)                   
+               tokPairCount[pair]=tokPairCount[pair] - oldCount[pair]*wordCountForWord
+                   
+           for pair in newNotOld:               
+               if (pair in tokPairCount):
+                   if (pair in pairToItem):
+                       changedTokPairs.add(pair)
+               else: 
+                   newPairs.append(pair)
+                       
+               tokPairCount[pair]=tokPairCount.get(pair,0) + newCount[pair]*wordCountForWord
+
                if (pair in pairToWord):
                    pairToWord[pair].add(wordToUpdate)
                else:
                    pairToWord[pair]=set([wordToUpdate])
                    
            for pair in both:
-               tokPairCount[pair]=tokPairCount[pair] + wordCount[wordToUpdate]*(newCount[pair] - oldCount[pair])
+               if (newCount[pair] != oldCount[pair]):
+                   #if (not (pair in changedTokPairs) ):
+                   changedTokPairs.add(pair)
+                   tokPairCount[pair]=tokPairCount[pair] + wordCountForWord*(newCount[pair] - oldCount[pair])
                               
            wordToToks[wordToUpdate]=newTokList 
- 
-       tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (item[1], (vocab[item[0][0]]),vocab[item[0][1]] ),reverse=True)
+
+
+
+       prePairTime=datetime.datetime.now()
+       for pair in changedTokPairs:
+           oldItem=pairToItem[pair]
+           
+           #i=bisect.bisect_left(tokPairItemList,oldItem)
+           #if (i==0):
+           #    tokPairItemList=tokPairItemList[1:]
+           #elif (i==len(tokPairItemList)-1):
+           #    tokPairItemList=tokPairItemList[0:i]
+           #else:
+           #    tokPairItemList=tokPairItemList[0:i] + tokPairItemList[i+1:]
+               
+           tokPairItemList.remove(oldItem)               
+           newItem=TokPairItem((pair,tokPairCount[pair]))
+           pairToItem[pair]=newItem 
+           bisect.insort(tokPairItemList,newItem,key=myKey)#  cmp_to_key(make_comparator(tokCompare)))
+
+       #postChangeTime=datetime.datetime.now() - prePairTime
+       #totalChangeTime=totalChangeTime + postChangeTime.total_seconds()
+           #print('new pairs')
+       #if (topPair in newPairs):
+       #    print('nono')
+       #    import pdb; pdb.set_trace()
+       
+       for pair in newPairs:
+           newItem=TokPairItem((pair,tokPairCount[pair]))
+           pairToItem[pair]=newItem
+           bisect.insort(tokPairItemList,newItem,key=myKey)#=cmp_to_key(make_comparator(tokCompare)))
+
+       #pairTime=datetime.datetime.now() - prePairTime
+       #print(pairTime)
+       #totalPairTime=totalPairTime + pairTime.total_seconds()
+       
+       
+       #print('all done')
+       #import pdb; pdb.set_trace()
+       #tokPairOrderedList=sorted(tokPairCount.items(),key=lambda item: (item[1], (vocab[item[0][0]]),vocab[item[0][1]] ),reverse=True)
                                                                         #item[0]) )
 
-       
+    
        #if (mIdx < 10):
            
        #    print('now ordered list is')
@@ -1794,6 +2092,8 @@ def run_train_bpe(
     #print('first merge is ', merges[0])
     #print('first 10 are ', merges[0:10])
 
+    print('totalPairTime %4.4f'%totalPairTime)
+    print('totalChangeTime %4.4f'%totalChangeTime)
     print('done',datetime.datetime.now())
     return vocab,merges  
     
