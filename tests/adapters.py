@@ -25,7 +25,7 @@ from collections import Counter
 
 from multiprocessing import Process
 
-from cs336_basics import tokenizer
+from cs336_basics import tokenizer,llModel
 
 def run_linear(
     d_in: int,
@@ -128,38 +128,20 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    #print(Q.shape)
-    #print(Q.mean(axis=0))
-    #print(Q.std(axis=0))
-    #print(Q.mean(axis=1))
-    #print(Q.std(axis=1))
-    #print(K.shape)
+    print('new thing')
+    import pdb; pdb.set_trace()
+    return llModel.LLModel.run_scaled_dot_product_attention(Q,K,V,mask)
+    #QKTranspose=Q@torch.transpose(K,-2,-1)
+    #dk=float(K.shape[-1]) 
+    #QKTransposeScaled=QKTranspose/np.sqrt(dk)
 
-    #QNorm=Q-Q.mean()#axis=2)
-    #QNorm=QNorm/Q.std()#axis=2)
-    #KNorm=K-K.mean()#axis=2)
-    #KNorm=KNorm/K.std()#axis=2)
-     
-    QKTranspose=Q@torch.transpose(K,-2,-1)
-    dk=float(K.shape[-1]) 
-    QKTransposeScaled=QKTranspose/np.sqrt(dk)
+    #if (mask != None): 
+    ##    QKTransposeScaled += np.array(np.where(mask==1,0,-np.inf),dtype=np.float32)
+    #SM=nn.Softmax(-1)#QKTransposeScaled)
+    #SMResult=SM(QKTransposeScaled)
 
-    #print('---------------- ')
-
-    #print('QK shape in here is',QKTranspose.shape)
-    #if (mask != None):
-    #    print('mask shape is',mask.shape)
-    #print('---------------------')
+    #return SMResult@V
     
-    if (mask != None): 
-        QKTransposeScaled += np.array(np.where(mask==1,0,-np.inf),dtype=np.float32)
-    SM=nn.Softmax(-1)#QKTransposeScaled)
-    SMResult=SM(QKTransposeScaled)
-    #print(SMResult.shape)
-    #print(V.shape)
-    #import pdb; pdb.set_trace()
-    return SMResult@V
-    #raise NotImplementedError
 
     
 def run_multihead_self_attention(
@@ -244,6 +226,18 @@ def run_multihead_self_attention_with_rope(
         #doMask=False,
     token_positions: Int[Tensor, " ... sequence_length"] | None = None,
 ) -> Float[Tensor, " ... sequence_length d_out"]:
+
+    print('!!!!!!!!!!!!!!!!!!!!!!!!! ALL NEW !!!!!')
+    return llModel.LLModel.run_multihead_self_attention_with_rope(d_model,
+                                                                  num_heads,
+                                                                  max_seq_len,
+                                                                  theta,
+                                                                  q_proj_weight,
+                                                                  k_proj_weight,
+                                                                  v_proj_weight,
+                                                                  o_proj_weight,
+                                                                  in_features,
+                                                                  token_positions)
     """
     Given the key, query, and value projection weights of a naive unbatched
     implementation of multi-head attention, return the output of an optimized batched
@@ -286,19 +280,8 @@ def run_multihead_self_attention_with_rope(
 
     seqLen=len(token_positions[0])
 
-    #if (q_proj.shape[1] < seqLen):
-        #print('doing it')
-        #import pdb; pdb.set_trace()
-        #extra=seqLen - q_proj.shape[1]
-   #     q_proj=torch.concat((q_proj,torch.zeros(q_proj.shape[0],extra,q_proj.shape[2])),1)
-   #     k_proj=torch.concat((k_proj,torch.zeros(k_proj.shape[0],extra,k_proj.shape[2])),1)
-   #     v_proj=torch.concat((v_proj,torch.zeros(v_proj.shape[0],extra,v_proj.shape[2])),1)
-    #print('seqLen here in rope is',seqLen)
-    #import pdb; pdb.set_trace()
-    #print('theta in multihead',theta)
-    #print('d_k in multihead',d_k)
-    #print('token_positions',token_positions)
-    for h in range(num_heads):#range(num_heads -1,-1,-1):                                                                                                                                   
+
+    for h in range(num_heads):
         startIdx=h*d_k
 
         endIdx=(h+1)*d_k
@@ -348,41 +331,11 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-
-    #print('theta in here',theta)
-    def ropeMat(m,d):
-        #print('m in ropeMat',m)
-        #print('d in ropeMat',d)
-        thetas=[m*np.pow(theta,-2*(i-1)/float(d)) for i in range(1,int(d/2 + 1))]
-        #print('thetas',thetas)
-        cosines=torch.tensor(np.concatenate([[np.cos(tht),np.cos(tht)] for tht in thetas]))
-        sinesBelow=torch.tensor(np.concatenate([[np.sin(tht),0] for tht in thetas]))
-        sinesAbove=torch.tensor(np.concatenate([[-np.sin(tht),0] for tht in thetas]))
-        rMat=torch.zeros(d,d)
-        rMat=rMat.diagonal_scatter(cosines)
-        rMat=rMat.diagonal_scatter(sinesBelow[0:-1],1)
-        rMat=rMat.diagonal_scatter(sinesAbove[0:-1],-1)
-        return rMat
-
-    #print('--- token_positions',token_positions)
-    seqLength=token_positions.shape[-1]
-    #allRopeMat=torch.cat([ropeMat(token_positions[i],d_k) for i in range(seqLength)],-1)
-    res=torch.zeros(in_query_or_key.shape[0],in_query_or_key.shape[1],in_query_or_key.shape[2])
-
-    res=torch.zeros(in_query_or_key.shape[0],seqLength,in_query_or_key.shape[2])
-
-    print('key place')
-    #import pdb; pdb.set_trace()
-    for i in range(seqLength):
-        if (i >= in_query_or_key.shape[1]):
-            res[:,i,:]=0.
-        else:
-            res[:,i,:]=in_query_or_key[:,i,:]@ropeMat(token_positions[i],d_k)
     
-    return res
-       
+    return llModel.LLModel.run_rope(d_k,theta,max_seq_len,in_query_or_key,token_positions)
 
 
+ 
 def run_transformer_block(
     d_model: int,
     num_heads: int, 
@@ -455,23 +408,9 @@ def run_transformer_block(
     """
 
     seqLen=in_features.shape[1]
-    #if (seqLen==6):
-    #    seqLen=12
-    #    in_features=torch.concat((in_features,torch.zeros(in_features.shape)),dim=1)
-        
+            
     tokenPos=torch.Tensor([[i for i in range(0,seqLen )]])
-    print('d_model',d_model)
-    print('num_heads',num_heads)
-    print('d_ff',d_ff)
-    print('tokenPos',tokenPos)
-    print('max_seq_len',max_seq_len)
-    print('in features shape',in_features.shape)
-    print('ln1.weight shape',weights['ln1.weight'].shape)
-    print('ln2.weight shape',weights['ln2.weight'].shape)
-    print('output proj shape',weights['attn.output_proj.weight'].shape)
-
-    #print('ffn shape',
-    #had to find this by doing bisection- was there any place I was told to use this epsilon???
+    
     eps=5e-6
     rmsNormOut=run_rmsnorm(d_model,eps,weights['ln1.weight'],in_features)
     
@@ -485,21 +424,12 @@ def run_transformer_block(
                                                    rmsNormOut,#in_features,
                                                    tokenPos)
 
-    print('attnOut shape',attnOut.shape)
- 
-    #eps=1e-5
     
     rmsNormOut2=run_rmsnorm(d_model,eps,weights['ln2.weight'],
                             attnOut + in_features)
 
     d_ff=weights['ffn.w1.weight'].shape[0]
     
-    #swigluOut=run_swiglu(d_model,d_ff,weights['ffn.w1.weight'],
-    #                     torch.transpose(weights['ffn.w3.weight'],0,1),
-    #                     torch.transpose(weights['ffn.w2.weight'],0,1),
-    #                     rmsNormOut2)
-
-    print('d_ff is ', d_ff)
     
     swigluOut=run_swiglu(d_model,d_ff,weights['ffn.w1.weight'],
                          weights['ffn.w2.weight'],
@@ -507,17 +437,7 @@ def run_transformer_block(
                          rmsNormOut2)
 
     
-    #print('rmsNorm out shape',rmsNormOut.shape)
-    
-    #print('**** swigluOut shape',swigluOut.shape)
-    #rmsOut2=run_rmsnorm(d_model,eps,weights['ln2.weight'],swigluOut + rmsNormOut)
-     
-    
-    #print('ffn w1 shape',weights['ffn.w1.weight'].shape)
-    #print('ffn w2 shape',weights['ffn.w2.weight'].shape)
-    #print('ffn w3 shape',weights['ffn.w3.weight'].shape)
-
-    
+        
     return swigluOut + attnOut + in_features
 
      
@@ -606,35 +526,12 @@ def run_transformer_lm(
         next-word distribution for each token.
     """
 
-    print('context_length',context_length)
-    print('in_indices shape',in_indices.shape)
-    print('d_model',d_model)
-    print('d_ff',d_ff)
-    print('vocab_size',vocab_size)
-    print('num_layers',num_layers)
-    print('num_heads',num_heads)
-
-
-    #if (in_indices.shape[1] < 12):
-    #    shortfall=12 - in_indices.shape[1]#
-
-    #    last=in_indices[:,-1:]
-    #    print(last.shape)
-    #    import pdb; pdb.set_trace()
-    #    for i in range(shortfall):
-    #        in_indices=torch.concat((in_indices,last),1)
-
-    #in_indices=torch.concat((in_indices,in_indices),1)
-    
-    #TMP!!!!
-    #if (in_indices.shape[1]==6):
-    #    in_indices=torch.concat((in_indices,in_indices),dim=1)
     
     layerOutput=run_embedding(vocab_size,d_model,weights['token_embeddings.weight'],
                               in_indices)
 
-    #print('layerOutput shape',layerOutput.shape)
-    #import pdb; pdb.set_trace()
+
+
     for i in range(num_layers):
         weightDct=dict()
         for ky in ['attn.q_proj.weight',
@@ -648,9 +545,6 @@ def run_transformer_lm(
                    'ffn.w3.weight']:
             weightDct[ky]=weights['layers.%d.%s'%(i,ky)]
 
-            print(i,ky,weightDct[ky].shape)
-            #print('keys are!!!')
-            #print([ky for ky in weightDct])
         layerOutput=run_transformer_block(d_model,
                                           num_heads,
                                           d_ff,
@@ -664,21 +558,10 @@ def run_transformer_lm(
     normed=run_rmsnorm(d_model,eps,weights['ln_final.weight'],layerOutput)
     finalOut=normed@torch.transpose(weights['lm_head.weight'],0,1)
 
-    #cheesy way to get the test to pass
-    #actualSeqLen=finalOut.shape[1]
-    #if (actualSeqLen < 12):
-    #    empty=torch.zeros(finalOut.shape[0],12-actualSeqLen,finalOut.shape[2])
-    #    finalOut=torch.concat((finalOut,empty),dim=1)
-    return finalOut#run_embedding(vocab_size,d_model,
-                   #      weights['lm_head.weight'],
-                   #      finalOut)
-
-
-    #return finalOut@torch.transpose(weights['lm_head.weight'],0,1)
-
-    #raise NotImplementedError
-
-   
+    
+    return finalOut
+                   
+                    
 def run_rmsnorm(
     d_model: int,
     eps: float,
