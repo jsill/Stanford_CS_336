@@ -68,7 +68,8 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-    return weights[token_ids,:]
+    return llModel.LLModel.run_embedding(vocab_size,d_model,weights,token_ids)
+    #return weights[token_ids,:]
     #raise NotImplementedError
 
 
@@ -101,12 +102,14 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    sigm=nn.Sigmoid()
-    xw=in_features@torch.transpose(w1_weight,0,1)
-    swish=np.multiply(xw,sigm(xw))
-    xv=in_features@torch.transpose(w3_weight,0,1)
-    swishTimesXV=np.multiply(swish,xv)
-    return swishTimesXV@torch.transpose(w2_weight,0,1)
+
+    return llModel.LLModel.run_swiglu(d_model,d_ff,w1_weight,w2_weight,w3_weight,in_features)
+    #sigm=nn.Sigmoid()
+    #xw=in_features@torch.transpose(w1_weight,0,1)
+    #swish=np.multiply(xw,sigm(xw))
+    #xv=in_features@torch.transpose(w3_weight,0,1)
+    #swishTimesXV=np.multiply(swish,xv)
+    #return swishTimesXV@torch.transpose(w2_weight,0,1)
     #raise NotImplementedError
 
 
@@ -128,8 +131,8 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    print('new thing')
-    import pdb; pdb.set_trace()
+    #print('new thing')
+    #import pdb; pdb.set_trace()
     return llModel.LLModel.run_scaled_dot_product_attention(Q,K,V,mask)
     #QKTranspose=Q@torch.transpose(K,-2,-1)
     #dk=float(K.shape[-1]) 
@@ -227,7 +230,7 @@ def run_multihead_self_attention_with_rope(
     token_positions: Int[Tensor, " ... sequence_length"] | None = None,
 ) -> Float[Tensor, " ... sequence_length d_out"]:
 
-    print('!!!!!!!!!!!!!!!!!!!!!!!!! ALL NEW !!!!!')
+
     return llModel.LLModel.run_multihead_self_attention_with_rope(d_model,
                                                                   num_heads,
                                                                   max_seq_len,
@@ -407,45 +410,24 @@ def run_transformer_block(
         running the Transformer block on the input features while using RoPE.
     """
 
-    seqLen=in_features.shape[1]
-            
-    tokenPos=torch.Tensor([[i for i in range(0,seqLen )]])
     
-    eps=5e-6
-    rmsNormOut=run_rmsnorm(d_model,eps,weights['ln1.weight'],in_features)
     
-    attnOut=run_multihead_self_attention_with_rope(d_model,num_heads,
-                                                   max_seq_len,
-                                                   theta,
-                                                   weights['attn.q_proj.weight'],
-                                                   weights['attn.k_proj.weight'],
-                                                   weights['attn.v_proj.weight'],
-                                                   weights['attn.output_proj.weight'],
-                                                   rmsNormOut,#in_features,
-                                                   tokenPos)
+    return llModel.LLModel.run_transformer_block(d_model,
+                                                 num_heads,
+                                                 d_ff,
+                                                 max_seq_len,
+                                                 theta,
+                                                 weights,
+                                                 in_features)
 
     
-    rmsNormOut2=run_rmsnorm(d_model,eps,weights['ln2.weight'],
-                            attnOut + in_features)
-
-    d_ff=weights['ffn.w1.weight'].shape[0]
-    
-    
-    swigluOut=run_swiglu(d_model,d_ff,weights['ffn.w1.weight'],
-                         weights['ffn.w2.weight'],
-                         weights['ffn.w3.weight'],
-                         rmsNormOut2)
-
-    
-        
-    return swigluOut + attnOut + in_features
 
      
 
     #raise Exception('I tried')
     #raise NotImplementedError
 
-
+ 
 def run_transformer_lm(
     vocab_size: int,
     context_length: int,
@@ -526,9 +508,22 @@ def run_transformer_lm(
         next-word distribution for each token.
     """
 
-    
-    layerOutput=run_embedding(vocab_size,d_model,weights['token_embeddings.weight'],
-                              in_indices)
+
+    print('lm now')
+    #import pdb; pdb.set_trace()
+    return llModel.LLModel.run_transformer_lm(
+            vocab_size,
+            context_length,
+            d_model,
+            num_layers,
+            num_heads,
+            d_ff,
+            rope_theta,
+            weights,
+            in_indices)
+ 
+    layerOutput=llModel.LLModel.run_embedding(vocab_size,d_model,weights['token_embeddings.weight'],
+                                              in_indices)
 
 
 
@@ -545,17 +540,17 @@ def run_transformer_lm(
                    'ffn.w3.weight']:
             weightDct[ky]=weights['layers.%d.%s'%(i,ky)]
 
-        layerOutput=run_transformer_block(d_model,
-                                          num_heads,
-                                          d_ff,
-                                          context_length,#???
-                                          rope_theta,
-                                          weightDct,
-                                          layerOutput)#????
+        layerOutput=llModel.LLModel.run_transformer_block(d_model,
+                                                          num_heads,
+                                                          d_ff,
+                                                          context_length,#???
+                                                          rope_theta,
+                                                          weightDct,
+                                                          layerOutput)#????
             
 
     eps=5e-6
-    normed=run_rmsnorm(d_model,eps,weights['ln_final.weight'],layerOutput)
+    normed=llModel.LLModel.run_rmsnorm(d_model,eps,weights['ln_final.weight'],layerOutput)
     finalOut=normed@torch.transpose(weights['lm_head.weight'],0,1)
 
     
@@ -583,26 +578,25 @@ def run_rmsnorm(
         RMSNorm of the `in_features`.
     """
 
-    a=in_features
-    aSq=a.square()
-    dim=a.dim() 
-    aSqMean=torch.mean(aSq,dim-1)#,tuple(range(0,dim-1)))
+    return llModel.LLModel.run_rmsnorm(d_model,eps,weights,in_features)
+    #a=in_features
+    #aSq=a.square()
+    #dim=a.dim() 
+    #aSqMean=torch.mean(aSq,dim-1)#,tuple(range(0,dim-1)))
     
     
-    #aRMS=np.power(aSqMean,0.5)
-    
-    aRMS=aSqMean.sqrt()+ eps
+    #aRMS=aSqMean.sqrt()+ eps
 
     #REVISIT...there is surely a better way than all this transposing
-    a=a.transpose(0,2)
-    a=a.transpose(1,2)
-    aDiv=a.div(aRMS)
-    aDiv=aDiv.transpose(1,2)
-    aDiv=aDiv.transpose(0,2)
-    return aDiv*weights
+    #a=a.transpose(0,2)
+    #a=a.transpose(1,2)
+    #aDiv=a.div(aRMS)
+    #aDiv=aDiv.transpose(1,2)
+    #aDiv=aDiv.transpose(0,2)
+    #return aDiv*weights
     #raise NotImplementedError
   
-
+ 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
     """Given a tensor of inputs, return the output of applying SiLU
     to each element.
@@ -1391,7 +1385,7 @@ def run_train_bpe(
     #    print('-----',typ)
     #    print(compDict(resultList[0][typ],res[typ]))
     #import pdb; pdb.set_trace()
-    
+     
     #wordCount=resultList[0]['wordCount']
     #wordToToks=resultList[0]['wordToToks']
     #pairToWord=resultList[0]['pairToWord']
