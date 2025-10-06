@@ -10,18 +10,89 @@ import numpy as np
  
 class LLModel(torch.nn.Module):
 
-    def __init__(self,vocab_size):
+    def __init__(self,
+                 vocab_size,
+                 context_length,
+                 d_model,
+                 num_layers,
+                 num_heads,
+                 d_ff,
+                 rope_theta
+                 ):
         super(LLModel,self).__init__()
 
-        self.vocab_size=vocab_size,
-        self.context_length=context_length,
-        self.d_model=d_model,
-        self.num_layers=num_layers,
-        self.num_heads=num_heads,
-        self.d_ff=d_ff,
-        self.rope_theta=rope_theta,
+        
+        self.vocab_size=vocab_size
+        self.context_length=context_length
+        self.d_model=d_model
+        self.num_layers=num_layers
+        self.num_heads=num_heads
+        self.d_ff=d_ff
+        self.rope_theta=rope_theta
+        self.weightDct=dict()
+        tokEmbWeight=torch.empty(vocab_size,d_model)
+        torch.nn.init.trunc_normal_(tokEmbWeight,mean=0,std=1,a=-3,b=3)
+        self.weightDct['token_embeddings.weight']=tokEmbWeight
+        lnFinalWeight=torch.empty(d_model)
+        torch.nn.init.trunc_normal_(lnFinalWeight,mean=0,std=1,a=-3,b=-3)
+        self.weightDct['ln_final.weight']=lnFinalWeight
+        sigmSq=2./(vocab_size + d_model)
+        sigm=np.sqrt(sigmSq)
+        lowerCutoff=-3.*sigm
+        upperCutoff=3.*sigm
+        lmHeadWeight=torch.empty(vocab_size,d_model)
+        torch.nn.init.trunc_normal_(lmHeadWeight,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
+        self.weightDct['lm_head.weight']=lmHeadWeight
+        for layerIdx in range(num_layers):
+            qProj=torch.empty(d_model,d_model)
+            sigmSq=2./(d_model+ d_model)
+            sigm=np.sqrt(sigmSq)
+            lowerCutoff=-3.*sigm
+            upperCutoff=3.*sigm
+            torch.nn.init.trunc_normal_(qProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
+            self.weightDct['layers.%d.attn.q_proj.weight'%layerIdx]=qProj
+            kProj=torch.empty(d_model,d_model)
+            torch.nn.init.trunc_normal_(kProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
+            self.weightDct['layers.%d.attn.k_proj.weight'%layerIdx]=kProj
+            vProj=torch.empty(d_model,d_model)
+            torch.nn.init.trunc_normal_(vProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
+            self.weightDct['layers.%d.attn.v_proj.weight'%layerIdx]=vProj
+            outputProj=torch.empty(d_model,d_model)
+            torch.nn.init.trunc_normal_(outputProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
+            self.weightDct['layers.%d.attn.output_proj.weight'%layerIdx]=outputProj
+            ln1Weight=torch.empty(d_model)
+            torch.nn.init.constant_(ln1Weight,1)
+            self.weightDct['layers.%d.ln1.weight'%layerIdx]=ln1Weight
+            ln2Weight=torch.empty(d_model)
+            torch.nn.init.constant_(ln2Weight,1)
+            self.weightDct['layers.%d.ln2.weight'%layerIdx]=ln2Weight
+            ffnW1=torch.empty(d_ff,d_model)
+            sigmSq=2./(d_ff + d_model)
+            sigm=np.sqrt(sigmSq)
+            lowerCutoff=-3.*sigm
+            upperCutoff=3.*sigm
+            torch.nn.init.trunc_normal_(ffnW1,0,sigm,lowerCutoff,upperCutoff)
+            self.weightDct['layers.%d.ffn.w1.weight'%layerIdx]=ffnW1
+            ffnW2=torch.empty(d_model,d_ff)
+            torch.nn.init.trunc_normal_(ffnW2,0,sigm,lowerCutoff,upperCutoff)
+            self.weightDct['layers.%d.ffn.w2.weight'%layerIdx]=ffnW2
+            ffnW3=torch.empty(d_ff,d_model)
+            torch.nn.init.trunc_normal_(ffnW3,0,sigm,lowerCutoff,upperCutoff)
+            self.weightDct['layers.%d.ffn.w3.weight'%layerIdx]=ffnW3
+             
+        #for layerIdx in range(num_layers):
+        #    for ky in ['attn.q_proj.weight',
+        #               'attn.k_proj.weight',
+        #               'attn.v_proj.weight',
+        #               'attn.output_proj.weight',
+        #               'ln1.weight',
+        #               'ln2.weight',
+        #               'ffn.w1.weight',
+        #               'ffn.w2.weight',
+        #               'ffn.w3.weight']:
+                
         #weights: dict[str, Tensor],
-
+ 
 
     def run_embedding(
             vocab_size: int,
@@ -242,6 +313,17 @@ class LLModel(torch.nn.Module):
         return swigluOut + attnOut + in_features
 
 
+    def forward(self,in_indices):
+        return LLModel.run_transformer_lm(self.vocab_size,
+                                  self.context_length,
+                                  self.d_model,
+                                  self.num_layers,
+                                  self.num_heads,
+                                  self.d_ff,
+                                  self.rope_theta,
+                                  self.weightDct,
+                                  in_indices)
+    
     def run_transformer_lm(
             vocab_size: int,
             context_length: int,
@@ -258,17 +340,19 @@ class LLModel(torch.nn.Module):
 
 
 
+        #print('HERE\n\n\n')
+        #import pdb; pdb.set_trace()
         for i in range(num_layers):
             weightDct=dict()
-            for ky in ['attn.q_proj.weight',
-                       'attn.k_proj.weight',
-                       'attn.v_proj.weight',
-                       'attn.output_proj.weight',
-                       'ln1.weight',
-                       'ln2.weight',
-                       'ffn.w1.weight',
-                       'ffn.w2.weight',
-                       'ffn.w3.weight']:
+            for ky in ['attn.q_proj.weight',#d_model by d_model
+                       'attn.k_proj.weight',#d_model by d_model
+                       'attn.v_proj.weight',#d_model by d_model
+                       'attn.output_proj.weight',#d_model by d-model
+                       'ln1.weight',#d_model
+                       'ln2.weight',#d_model
+                       'ffn.w1.weight',#d_ff by d_model
+                       'ffn.w2.weight',#d_model by d_ff
+                       'ffn.w3.weight']:#d_ff by d_model
                 weightDct[ky]=weights['layers.%d.%s'%(i,ky)]
 
             layerOutput=LLModel.run_transformer_block(d_model,
@@ -284,6 +368,7 @@ class LLModel(torch.nn.Module):
         normed=LLModel.run_rmsnorm(d_model,eps,weights['ln_final.weight'],layerOutput)
         finalOut=normed@torch.transpose(weights['lm_head.weight'],0,1)
 
+        import pdb; pdb.set_trace()
         return finalOut
 
     
