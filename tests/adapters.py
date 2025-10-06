@@ -509,52 +509,21 @@ def run_transformer_lm(
     """
 
 
-    print('lm now')
+    print('constructed lm now\n')
     #import pdb; pdb.set_trace()
-    return llModel.LLModel.run_transformer_lm(
-            vocab_size,
-            context_length,
-            d_model,
-            num_layers,
-            num_heads,
-            d_ff,
-            rope_theta,
-            weights,
-            in_indices)
- 
-    layerOutput=llModel.LLModel.run_embedding(vocab_size,d_model,weights['token_embeddings.weight'],
-                                              in_indices)
-
-
-
-    for i in range(num_layers):
-        weightDct=dict()
-        for ky in ['attn.q_proj.weight',
-                   'attn.k_proj.weight',
-                   'attn.v_proj.weight',
-                   'attn.output_proj.weight',
-                   'ln1.weight',
-                   'ln2.weight',
-                   'ffn.w1.weight',
-                   'ffn.w2.weight',
-                   'ffn.w3.weight']:
-            weightDct[ky]=weights['layers.%d.%s'%(i,ky)]
-
-        layerOutput=llModel.LLModel.run_transformer_block(d_model,
-                                                          num_heads,
-                                                          d_ff,
-                                                          context_length,#???
-                                                          rope_theta,
-                                                          weightDct,
-                                                          layerOutput)#????
-            
-
-    eps=5e-6
-    normed=llModel.LLModel.run_rmsnorm(d_model,eps,weights['ln_final.weight'],layerOutput)
-    finalOut=normed@torch.transpose(weights['lm_head.weight'],0,1)
-
     
-    return finalOut
+    theModel=llModel.LLModel(vocab_size,
+                             context_length,
+                             d_model,
+                             num_layers,
+                             num_heads,
+                             d_ff,
+                             rope_theta)
+
+    theModel.weightDct=weights
+    fwdRes=theModel.forward(in_indices)
+
+    return fwdRes
                    
                     
 def run_rmsnorm(
