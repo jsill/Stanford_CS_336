@@ -66,11 +66,11 @@ if __name__=='__main__':
         #import pdb; pdb.set_trace()
         loss=trainTools.run_cross_entropy(predictions,batchLabels)
 
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         loss.backward()
         
-        #print('i did backward')
-        import pdb; pdb.set_trace()
+        print('i did backward')
+        #import pdb; pdb.set_trace()
 
         
     
