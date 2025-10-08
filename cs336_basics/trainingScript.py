@@ -50,27 +50,36 @@ if __name__=='__main__':
                           rope_theta
                           )
 
-    for bIdx in range(len(boundaries)):
-        textString=mmappedFile[boundaries[bIdx]:boundaries[bIdx + 1]].tobytes().decode('utf-8')
+    import pdb; pdb.set_trace() 
+    optimizer=trainTools.AdamW(model.parameters(),
+                               lr=1e-3,
+                               weight_decay=1e-3,
+                               betas=(0.9,0.999),
+                               eps=1e-8)
 
-        #import pdb; pdb.set_trace()
-        print('encoding')
-        encodedText=np.array(bpeTokenizer.encode(textString))
-        print('encoded')
+    numSteps=10
+    for sIdx in range(numSteps):
+        for bIdx in [0]:#range(len(boundaries)):
+            textString=mmappedFile[boundaries[bIdx]:boundaries[bIdx + 1]].tobytes().decode('utf-8')
+
         
-        batchSamples,batchLabels=trainTools.get_batch(encodedText,batchSize,contextLength,'cpu')
-
+            print('encoding')
+            encodedText=np.array(bpeTokenizer.encode(textString))
+            print('encoded')
         
-        predictions=model.forward(batchSamples)
+            batchSamples,batchLabels=trainTools.get_batch(encodedText,batchSize,contextLength,'cpu')
 
-        #import pdb; pdb.set_trace()
-        loss=trainTools.run_cross_entropy(predictions,batchLabels)
+            predictions=model.forward(batchSamples)
 
-        #import pdb; pdb.set_trace()
-        loss.backward()
+            loss=trainTools.run_cross_entropy(predictions,batchLabels)
+
+            print('backwarding')
+            loss.backward()
+            print('stepping')
+            optimizer.step()
+            print('step is %d loss is %f'%(sIdx,loss))
+            
         
-        print('i did backward')
-        #import pdb; pdb.set_trace()
 
         
     
