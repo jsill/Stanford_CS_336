@@ -74,29 +74,49 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     softm=run_softmax(inputs,1)
 
 
-    def safeLog(p):
-
-        if (p ==0):
-            #I had to find this by bisection...I wish I understood why this is correct, TODO, revisit                                                        
-            pIn=1.675e-184
-        else:
-            pIn=p
-        pInAr=np.array([pIn],dtype=np.float64)
-        #print('pInAr is ',pInAr)                                                                                                                            
-        return np.log(pInAr[0])
-
+    
+    
     if (len(targets.shape)==1):
-       softMaxMat=torch.Tensor([softm[i][targets[i]] for i in range(batchSize)])
-       return -torch.Tensor([np.mean([safeLog(softMaxMat[i]) for i in range(softMaxMat.shape[0])])])
-    elif (len(targets.shape)==2):
-       softMaxMat=torch.zeros(targets.shape)
+       vocabSize=softm.shape[1]
+       takeMat=torch.zeros(targets.shape,dtype=torch.int64)
        for i in range(targets.shape[0]):
-          for j in range(targets.shape[1]):
-             softMaxMat[i][j]=softm[i][j][targets[i][j]]
-       return -torch.Tensor([np.mean([safeLog(softMaxMat[i][j]) for i in range(softMaxMat.shape[0]) for j in range(softMaxMat.shape[1]) ])])
-    else:
+          takeMat[i]=i*vocabSize + targets[i]
+       #softMaxMat=torch.take(softm,takeMat)
+       #softMaxMat=softMaxMat.to(dtype=torch.float64)
+       #softMaxMat=torch.where(softMaxMat==0,1.675e-184,softMaxMat)
+       #import pdb; pdb.set_trace()
+       #softMaxMat=torch.log(softMaxMat)
+       #return -softMaxMat.mean()
+       #softMaxMat=torch.Tensor([softm[i][targets[i]] for i in range(batchSize)])
+       #return -torch.Tensor([np.mean([safeLog(softMaxMat[i]) for i in range(softMaxMat.shape[0])])])
+    elif (len(targets.shape)==2):
+       vocabSize=softm.shape[2]
+       dim0=targets.shape[0]
+       dim1=targets.shape[1] 
+       takeMat=torch.zeros(targets.shape,dtype=torch.int64)
+       for i in range(dim0):
+          for j in range(dim1):
+             #print('about to set take val\n')
+             #import pdb; pdb.set_trace()
+             takeMat[i][j]=(i*dim1 +j)*vocabSize + targets[i][j]
+  
+       #softMaxMat=torch.zeros(targets.shape,requires_grad=True)
+       #for i in range(targets.shape[0]):
+       #   for j in range(targets.shape[1]):
+       #      takeMat[i][j]=i*j
+       #return -torch.Tensor([np.mean([safeLog(softMaxMat[i][j]) for i in range(softMaxMat.shape[0]) for j in range(softMaxMat.shape[1]) ])])
+    else: 
        raise Exception('cross entropy only implemented for 1 and 2 dimensional target tensor')
 
+    softMaxMat=torch.take(softm,takeMat)
+    softMaxMat=softMaxMat.to(dtype=torch.float64)
+    softMaxMat=torch.where(softMaxMat==0,1.675e-184,softMaxMat)
+
+    softMaxMat=torch.log(softMaxMat)
+    #print('yeah baby \n\n')
+    #import pdb; pdb.set_trace()
+    return -softMaxMat.mean()
+  
     #import pdb; pdb.set_trace()
     #return -torch.Tensor([safeLog(softMaxMat).mean()])
     #return -torch.Tensor([np.mean([safeLog(softMaxMat[i]) for i in range(softMaxMat.shape[0])])])
