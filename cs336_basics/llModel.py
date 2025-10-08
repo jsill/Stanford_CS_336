@@ -30,53 +30,53 @@ class LLModel(torch.nn.Module):
         self.d_ff=d_ff
         self.rope_theta=rope_theta
         self.weightDct=dict()
-        tokEmbWeight=torch.empty(vocab_size,d_model)
+        tokEmbWeight=torch.empty(vocab_size,d_model,requires_grad=True)
         torch.nn.init.trunc_normal_(tokEmbWeight,mean=0,std=1,a=-3,b=3)
         self.weightDct['token_embeddings.weight']=tokEmbWeight
-        lnFinalWeight=torch.empty(d_model)
+        lnFinalWeight=torch.empty(d_model,requires_grad=True)
         torch.nn.init.trunc_normal_(lnFinalWeight,mean=0,std=1,a=-3,b=-3)
         self.weightDct['ln_final.weight']=lnFinalWeight
         sigmSq=2./(vocab_size + d_model)
         sigm=np.sqrt(sigmSq)
         lowerCutoff=-3.*sigm
         upperCutoff=3.*sigm
-        lmHeadWeight=torch.empty(vocab_size,d_model)
+        lmHeadWeight=torch.empty(vocab_size,d_model,requires_grad=True)
         torch.nn.init.trunc_normal_(lmHeadWeight,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
         self.weightDct['lm_head.weight']=lmHeadWeight
         for layerIdx in range(num_layers):
-            qProj=torch.empty(d_model,d_model)
+            qProj=torch.empty(d_model,d_model,requires_grad=True)
             sigmSq=2./(d_model+ d_model)
             sigm=np.sqrt(sigmSq)
             lowerCutoff=-3.*sigm
             upperCutoff=3.*sigm
             torch.nn.init.trunc_normal_(qProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
             self.weightDct['layers.%d.attn.q_proj.weight'%layerIdx]=qProj
-            kProj=torch.empty(d_model,d_model)
+            kProj=torch.empty(d_model,d_model,requires_grad=True)
             torch.nn.init.trunc_normal_(kProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
             self.weightDct['layers.%d.attn.k_proj.weight'%layerIdx]=kProj
-            vProj=torch.empty(d_model,d_model)
+            vProj=torch.empty(d_model,d_model,requires_grad=True)
             torch.nn.init.trunc_normal_(vProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
             self.weightDct['layers.%d.attn.v_proj.weight'%layerIdx]=vProj
-            outputProj=torch.empty(d_model,d_model)
+            outputProj=torch.empty(d_model,d_model,requires_grad=True)
             torch.nn.init.trunc_normal_(outputProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
             self.weightDct['layers.%d.attn.output_proj.weight'%layerIdx]=outputProj
-            ln1Weight=torch.empty(d_model)
+            ln1Weight=torch.empty(d_model,requires_grad=True)
             torch.nn.init.constant_(ln1Weight,1)
             self.weightDct['layers.%d.ln1.weight'%layerIdx]=ln1Weight
-            ln2Weight=torch.empty(d_model)
+            ln2Weight=torch.empty(d_model,requires_grad=True)
             torch.nn.init.constant_(ln2Weight,1)
             self.weightDct['layers.%d.ln2.weight'%layerIdx]=ln2Weight
-            ffnW1=torch.empty(d_ff,d_model)
+            ffnW1=torch.empty(d_ff,d_model,requires_grad=True)
             sigmSq=2./(d_ff + d_model)
             sigm=np.sqrt(sigmSq)
             lowerCutoff=-3.*sigm
             upperCutoff=3.*sigm
             torch.nn.init.trunc_normal_(ffnW1,0,sigm,lowerCutoff,upperCutoff)
             self.weightDct['layers.%d.ffn.w1.weight'%layerIdx]=ffnW1
-            ffnW2=torch.empty(d_model,d_ff)
+            ffnW2=torch.empty(d_model,d_ff,requires_grad=True)
             torch.nn.init.trunc_normal_(ffnW2,0,sigm,lowerCutoff,upperCutoff)
             self.weightDct['layers.%d.ffn.w2.weight'%layerIdx]=ffnW2
-            ffnW3=torch.empty(d_ff,d_model)
+            ffnW3=torch.empty(d_ff,d_model,requires_grad=True)
             torch.nn.init.trunc_normal_(ffnW3,0,sigm,lowerCutoff,upperCutoff)
             self.weightDct['layers.%d.ffn.w3.weight'%layerIdx]=ffnW3
              
@@ -102,6 +102,15 @@ class LLModel(torch.nn.Module):
     ) -> Float[Tensor, " ... d_model"]:
         return weights[token_ids,:]
 
+
+    def run_linear(d_in: int,
+                   d_out: int,
+                   weights: Float[Tensor, " d_out d_in"],
+                   in_features: Float[Tensor, " ... d_in"],
+) -> Float[Tensor, " ... d_out"]:
+
+        return in_features@torch.transpose(weights,0,1)
+                               
     def run_swiglu(
             d_model: int,
             d_ff: int,
@@ -112,9 +121,9 @@ class LLModel(torch.nn.Module):
     ) -> Float[Tensor, " ... d_model"]:
         sigm=torch.nn.Sigmoid()
         xw=in_features@torch.transpose(w1_weight,0,1)
-        swish=np.multiply(xw,sigm(xw))
+        swish=torch.multiply(xw,sigm(xw))
         xv=in_features@torch.transpose(w3_weight,0,1)
-        swishTimesXV=np.multiply(swish,xv)
+        swishTimesXV=torch.multiply(swish,xv)
         return swishTimesXV@torch.transpose(w2_weight,0,1)
 
     
@@ -135,7 +144,10 @@ class LLModel(torch.nn.Module):
             aDiv=a.div(aRMS)
             aDiv=aDiv.transpose(1,2)
             aDiv=aDiv.transpose(0,2)
-            return aDiv*weights
+            
+            res=aDiv*weights
+
+            return res
         
     def run_scaled_dot_product_attention(
             Q: Float[Tensor, " ... queries d_k"],
@@ -160,13 +172,59 @@ class LLModel(torch.nn.Module):
         QKTransposeScaled=QKTranspose/np.sqrt(dk)
 
         if (mask != None):
-            QKTransposeScaled += np.array(np.where(mask==1,0,-np.inf),dtype=np.float32)
+            
+            QKTransposeScaled += torch.where(mask==1,0.,-np.inf)#np.array(np.where(mask==1,0,-np.inf),dtype=np.float32)
         SM=torch.nn.Softmax(-1)#QKTransposeScaled)                                                                                                         
         SMResult=SM(QKTransposeScaled)
 
         return SMResult@V
 
 
+    def run_multihead_self_attention(
+            d_model: int,
+            num_heads: int,
+            q_proj_weight: Float[Tensor, " d_k d_in"],
+            k_proj_weight: Float[Tensor, " d_k d_in"],
+            v_proj_weight: Float[Tensor, " d_v d_in"],
+            o_proj_weight: Float[Tensor, " d_model d_v"],
+            in_features: Float[Tensor, " ... sequence_length d_in"],
+    ) -> Float[Tensor, " ... sequence_length d_out"]:
+
+        print('new way')
+        #import pdb; pdb.set_trace()
+        
+        d_k=int(d_model/num_heads)
+
+
+        q_proj=in_features@torch.transpose(q_proj_weight,0,1)
+        k_proj=in_features@torch.transpose(k_proj_weight,0,1)
+        v_proj=in_features@torch.transpose(v_proj_weight,0,1)
+
+
+        headList=[]
+
+        seqLen=in_features.shape[-2]
+
+        for h in range(num_heads):#range(num_heads -1,-1,-1):
+            startIdx=h*d_k
+
+            endIdx=(h+1)*d_k
+
+            mask=torch.Tensor(seqLen,seqLen)
+            for i in range(seqLen):
+                for j in range(seqLen):
+                    mask[i][j]=i >= j
+            res=LLModel.run_scaled_dot_product_attention(q_proj[:,:,startIdx:endIdx],k_proj[:,:,startIdx:endIdx],
+                                                 v_proj[:,:,startIdx:endIdx],mask)
+
+            headList.append(res)
+
+        concatResult=torch.concat(headList,-1)
+
+        output=concatResult@torch.transpose(o_proj_weight,0,1)
+
+        return output
+    
     def run_multihead_self_attention_with_rope(
             d_model: int,
             num_heads: int,
@@ -364,11 +422,11 @@ class LLModel(torch.nn.Module):
                                                       layerOutput)#????                                                                      
 
 
+        #import pdb; pdb.set_trace()
         eps=5e-6
         normed=LLModel.run_rmsnorm(d_model,eps,weights['ln_final.weight'],layerOutput)
         finalOut=normed@torch.transpose(weights['lm_head.weight'],0,1)
 
-        import pdb; pdb.set_trace()
         return finalOut
 
     
