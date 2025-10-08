@@ -335,8 +335,11 @@ def run_transformer_block(
         running the Transformer block on the input features while using RoPE.
     """
 
-    
-    
+    kys=[ky for ky in weights]
+    for ky in kys:
+        weights[ky.replace('.','_')]=weights[ky]
+        weights.pop(ky)
+        
     return llModel.LLModel.run_transformer_block(d_model,
                                                  num_heads,
                                                  d_ff,
@@ -346,7 +349,7 @@ def run_transformer_block(
                                                  in_features)
 
     
-
+ 
      
 
     #raise Exception('I tried')
@@ -433,7 +436,12 @@ def run_transformer_lm(
         next-word distribution for each token.
     """
 
+    kys=[ky for ky in weights]
 
+    for ky in kys:
+        weights[ky.replace('.','_')]=weights[ky]
+        weights.pop(ky)
+    
     print('constructed lm now\n')
     #import pdb; pdb.set_trace()
     
@@ -445,7 +453,7 @@ def run_transformer_lm(
                              d_ff,
                              rope_theta)
 
-    theModel.weightDct=weights
+    theModel.weightDct=nn.ParameterDict(weights)
     fwdRes=theModel.forward(in_indices)
 
     return fwdRes
