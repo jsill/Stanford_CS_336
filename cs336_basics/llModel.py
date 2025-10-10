@@ -9,6 +9,11 @@ import torch
 from torch import nn
 import numpy as np
  
+if (torch.cuda.is_available()):
+    DEVICE='cuda'#'cuda'
+else:
+    DEVICE='cpu'
+
 class LLModel(torch.nn.Module):
 
     def __init__(self,
@@ -22,7 +27,7 @@ class LLModel(torch.nn.Module):
                  ):
         super(LLModel,self).__init__()
 
-        
+        print('DEVICE is ...............',DEVICE)
         self.vocab_size=vocab_size
         self.context_length=context_length
         self.d_model=d_model
@@ -31,53 +36,53 @@ class LLModel(torch.nn.Module):
         self.d_ff=d_ff
         self.rope_theta=rope_theta 
         self.weightDct=nn.ParameterDict(dict())
-        tokEmbWeight=torch.empty(vocab_size,d_model,requires_grad=True)
+        tokEmbWeight=torch.empty(vocab_size,d_model,requires_grad=True,device=DEVICE)
         torch.nn.init.trunc_normal_(tokEmbWeight,mean=0,std=1,a=-3,b=3)
         self.weightDct['token_embeddings_weight']=tokEmbWeight
-        lnFinalWeight=torch.empty(d_model,requires_grad=True)
+        lnFinalWeight=torch.empty(d_model,requires_grad=True,device=DEVICE)
         torch.nn.init.trunc_normal_(lnFinalWeight,mean=0,std=1,a=-3,b=-3)
         self.weightDct['ln_final_weight']=lnFinalWeight
         sigmSq=2./(vocab_size + d_model)
         sigm=np.sqrt(sigmSq)
         lowerCutoff=-3.*sigm
         upperCutoff=3.*sigm
-        lmHeadWeight=torch.empty(vocab_size,d_model,requires_grad=True)
+        lmHeadWeight=torch.empty(vocab_size,d_model,requires_grad=True,device=DEVICE)
         torch.nn.init.trunc_normal_(lmHeadWeight,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
         self.weightDct['lm_head_weight']=lmHeadWeight
         for layerIdx in range(num_layers):
-            qProj=torch.empty(d_model,d_model,requires_grad=True)
+            qProj=torch.empty(d_model,d_model,requires_grad=True,device=DEVICE)
             sigmSq=2./(d_model+ d_model)
             sigm=np.sqrt(sigmSq)
             lowerCutoff=-3.*sigm
             upperCutoff=3.*sigm
             torch.nn.init.trunc_normal_(qProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
             self.weightDct['layers_%d_attn_q_proj_weight'%layerIdx]=qProj
-            kProj=torch.empty(d_model,d_model,requires_grad=True)
+            kProj=torch.empty(d_model,d_model,requires_grad=True,device=DEVICE)
             torch.nn.init.trunc_normal_(kProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
             self.weightDct['layers_%d_attn_k_proj_weight'%layerIdx]=kProj
-            vProj=torch.empty(d_model,d_model,requires_grad=True)
+            vProj=torch.empty(d_model,d_model,requires_grad=True,device=DEVICE)
             torch.nn.init.trunc_normal_(vProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
             self.weightDct['layers_%d_attn_v_proj_weight'%layerIdx]=vProj
-            outputProj=torch.empty(d_model,d_model,requires_grad=True)
+            outputProj=torch.empty(d_model,d_model,requires_grad=True,device=DEVICE)
             torch.nn.init.trunc_normal_(outputProj,mean=0,std=sigm,a=lowerCutoff,b=upperCutoff)
             self.weightDct['layers_%d_attn_output_proj_weight'%layerIdx]=outputProj
-            ln1Weight=torch.empty(d_model,requires_grad=True)
+            ln1Weight=torch.empty(d_model,requires_grad=True,device=DEVICE)
             torch.nn.init.constant_(ln1Weight,1)
             self.weightDct['layers_%d_ln1_weight'%layerIdx]=ln1Weight
-            ln2Weight=torch.empty(d_model,requires_grad=True)
+            ln2Weight=torch.empty(d_model,requires_grad=True,device=DEVICE)
             torch.nn.init.constant_(ln2Weight,1)
             self.weightDct['layers_%d_ln2_weight'%layerIdx]=ln2Weight
-            ffnW1=torch.empty(d_ff,d_model,requires_grad=True)
+            ffnW1=torch.empty(d_ff,d_model,requires_grad=True,device=DEVICE)
             sigmSq=2./(d_ff + d_model)
             sigm=np.sqrt(sigmSq)
             lowerCutoff=-3.*sigm
             upperCutoff=3.*sigm
             torch.nn.init.trunc_normal_(ffnW1,0,sigm,lowerCutoff,upperCutoff)
             self.weightDct['layers_%d_ffn_w1_weight'%layerIdx]=ffnW1
-            ffnW2=torch.empty(d_model,d_ff,requires_grad=True)
+            ffnW2=torch.empty(d_model,d_ff,requires_grad=True,device=DEVICE)
             torch.nn.init.trunc_normal_(ffnW2,0,sigm,lowerCutoff,upperCutoff)
             self.weightDct['layers_%d_ffn_w2_weight'%layerIdx]=ffnW2
-            ffnW3=torch.empty(d_ff,d_model,requires_grad=True)
+            ffnW3=torch.empty(d_ff,d_model,requires_grad=True,device=DEVICE)
             torch.nn.init.trunc_normal_(ffnW3,0,sigm,lowerCutoff,upperCutoff)
             self.weightDct['layers_%d_ffn_w3_weight'%layerIdx]=ffnW3
              
@@ -173,9 +178,10 @@ class LLModel(torch.nn.Module):
         QKTransposeScaled=QKTranspose/np.sqrt(dk)
 
         if (mask != None):
-            
+            #print('in mask')
+            #import pdb; pdb.set_trace()
             QKTransposeScaled += torch.where(mask==1,0.,-np.inf)#np.array(np.where(mask==1,0,-np.inf),dtype=np.float32)
-        SM=torch.nn.Softmax(-1)#QKTransposeScaled)                                                                                                         
+        SM=torch.nn.Softmax(-1)#QKTransposeScaled)                                                                                                          
         SMResult=SM(QKTransposeScaled)
 
         return SMResult@V
@@ -211,7 +217,9 @@ class LLModel(torch.nn.Module):
 
             endIdx=(h+1)*d_k
 
-            mask=torch.Tensor(seqLen,seqLen)
+            mask=torch.zeros(seqLen,seqLen,device=DEVICE)
+            #mask.to(DEVICE)
+            
             for i in range(seqLen):
                 for j in range(seqLen):
                     mask[i][j]=i >= j
@@ -248,6 +256,8 @@ class LLModel(torch.nn.Module):
          k_proj=in_features@torch.transpose(k_proj_weight,0,1)
          v_proj=in_features@torch.transpose(v_proj_weight,0,1)
 
+         #print('done proj')
+         #import pdb; pdb.set_trace()
 
          headList=[]
          
@@ -261,13 +271,14 @@ class LLModel(torch.nn.Module):
 
              endIdx=(h+1)*d_k
 
-             mask=torch.Tensor(seqLen,seqLen)
+             mask=torch.zeros(seqLen,seqLen,device=DEVICE)
+             #mask.to(DEVICE)
              for i in range(seqLen):
                  for j in range(seqLen):
                      mask[i][j]=i >= j
             #REVISIT, this passes the test but this is not the right way to handle the token positions...I'm taking advantage
             #of the token positions just being a 2-d version of a 1-d array in the test                                                              
-
+ 
 
              res=LLModel.run_scaled_dot_product_attention(LLModel.run_rope(d_k,theta,seqLen,q_proj[:,:,startIdx:endIdx],token_positions[0]),
                                                           LLModel.run_rope(d_k,theta,seqLen,k_proj[:,:,startIdx:endIdx],token_positions[0]),
@@ -304,10 +315,10 @@ class LLModel(torch.nn.Module):
     
         def ropeMat(m,d):
             thetas=[m*np.pow(theta,-2*(i-1)/float(d)) for i in range(1,int(d/2 + 1))]
-            cosines=torch.tensor(np.concatenate([[np.cos(tht),np.cos(tht)] for tht in thetas]))
-            sinesBelow=torch.tensor(np.concatenate([[np.sin(tht),0] for tht in thetas]))
-            sinesAbove=torch.tensor(np.concatenate([[-np.sin(tht),0] for tht in thetas]))
-            rMat=torch.zeros(d,d)
+            cosines=torch.tensor(np.concatenate([[np.cos(tht),np.cos(tht)] for tht in thetas]),device=DEVICE)
+            sinesBelow=torch.tensor(np.concatenate([[np.sin(tht),0] for tht in thetas]),device=DEVICE)
+            sinesAbove=torch.tensor(np.concatenate([[-np.sin(tht),0] for tht in thetas]),device=DEVICE)
+            rMat=torch.zeros(d,d,device=DEVICE)
             rMat=rMat.diagonal_scatter(cosines)
             rMat=rMat.diagonal_scatter(sinesBelow[0:-1],1)
             rMat=rMat.diagonal_scatter(sinesAbove[0:-1],-1)
@@ -315,18 +326,20 @@ class LLModel(torch.nn.Module):
 
         seqLength=token_positions.shape[-1]
     
-        res=torch.zeros(in_query_or_key.shape[0],in_query_or_key.shape[1],in_query_or_key.shape[2])
+        #res=torch.zeros(in_query_or_key.shape[0],in_query_or_key.shape[1],in_query_or_key.shape[2])
 
-        res=torch.zeros(in_query_or_key.shape[0],seqLength,in_query_or_key.shape[2])
+        res=torch.zeros(in_query_or_key.shape[0],seqLength,in_query_or_key.shape[2],device=DEVICE)
 
     
         for i in range(seqLength):
             if (i >= in_query_or_key.shape[1]):
                 res[:,i,:]=0.
             else:
+                #print('here')
+                #import pdb; pdb.set_trace()
                 res[:,i,:]=in_query_or_key[:,i,:]@ropeMat(token_positions[i],d_k)
 
-        return res
+        return res 
 
         seqLen=in_features.shape[1]
 
@@ -343,6 +356,7 @@ class LLModel(torch.nn.Module):
 
         seqLen=in_features.shape[1]
         tokenPos=torch.Tensor([[i for i in range(0,seqLen )]])
+        tokenPos.to(DEVICE)
 
         eps=5e-6
         rmsNormOut=LLModel.run_rmsnorm(d_model,eps,weights['ln1_weight'],in_features)
