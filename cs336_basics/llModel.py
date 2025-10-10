@@ -10,7 +10,7 @@ from torch import nn
 import numpy as np
  
 if (torch.cuda.is_available()):
-    DEVICE='cuda'#'cuda'
+    DEVICE='cuda'
 else:
     DEVICE='cpu'
 
@@ -34,7 +34,8 @@ class LLModel(torch.nn.Module):
         self.num_layers=num_layers
         self.num_heads=num_heads
         self.d_ff=d_ff
-        self.rope_theta=rope_theta 
+        self.rope_theta=rope_theta
+        self.rMatDict=dict()
         self.weightDct=nn.ParameterDict(dict())
         tokEmbWeight=torch.empty(vocab_size,d_model,requires_grad=True,device=DEVICE)
         torch.nn.init.trunc_normal_(tokEmbWeight,mean=0,std=1,a=-3,b=3)
@@ -245,6 +246,7 @@ class LLModel(torch.nn.Module):
             o_proj_weight: Float[Tensor, " d_model d_v"],
             in_features: Float[Tensor, " ... sequence_length d_in"],
             token_positions: Int[Tensor, " ... sequence_length"] | None = None,
+            rMatDict=dict()
 )-> Float[Tensor, " ... sequence_length d_out"]:
 
          print('in features shape here',in_features.shape)
@@ -266,22 +268,29 @@ class LLModel(torch.nn.Module):
          seqLen=len(token_positions[0])
 
 
+         mask=torch.zeros(seqLen,seqLen,device=DEVICE)
+         #mask.to(DEVICE)
+         for i in range(seqLen):
+             for j in range(seqLen):
+                 mask[i][j]=i >= j
+                 
          for h in range(num_heads):
              startIdx=h*d_k
 
              endIdx=(h+1)*d_k
 
-             mask=torch.zeros(seqLen,seqLen,device=DEVICE)
+             #mask=torch.zeros(seqLen,seqLen,device=DEVICE)
              #mask.to(DEVICE)
-             for i in range(seqLen):
-                 for j in range(seqLen):
-                     mask[i][j]=i >= j
+             #for i in range(seqLen):
+             #    for j in range(seqLen):
+             #        mask[i][j]=i >= j
+             
             #REVISIT, this passes the test but this is not the right way to handle the token positions...I'm taking advantage
             #of the token positions just being a 2-d version of a 1-d array in the test                                                              
  
 
-             res=LLModel.run_scaled_dot_product_attention(LLModel.run_rope(d_k,theta,seqLen,q_proj[:,:,startIdx:endIdx],token_positions[0]),
-                                                          LLModel.run_rope(d_k,theta,seqLen,k_proj[:,:,startIdx:endIdx],token_positions[0]),
+             res=LLModel.run_scaled_dot_product_attention(LLModel.run_rope(d_k,theta,seqLen,q_proj[:,:,startIdx:endIdx],token_positions[0],rMatDict=rMatDict),
+                                                          LLModel.run_rope(d_k,theta,seqLen,k_proj[:,:,startIdx:endIdx],token_positions[0],rMatDict=rMatDict),
                                                           v_proj[:,:,startIdx:endIdx],mask)
              headList.append(res)
 
@@ -298,6 +307,7 @@ class LLModel(torch.nn.Module):
             max_seq_len: int,
             in_query_or_key: Float[Tensor, " ... sequence_length d_k"],
             token_positions: Int[Tensor, " ... sequence_length"],
+            rMatDict=dict()
     ) -> Float[Tensor, " ... sequence_length d_k"]:
         """                                                                                                                                          
         Run RoPE for a given input tensor.                                                                                                           
@@ -312,17 +322,40 @@ class LLModel(torch.nn.Module):
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.                                                                      
         """
 
-    
-        def ropeMat(m,d):
-            thetas=[m*np.pow(theta,-2*(i-1)/float(d)) for i in range(1,int(d/2 + 1))]
-            cosines=torch.tensor(np.concatenate([[np.cos(tht),np.cos(tht)] for tht in thetas]),device=DEVICE)
-            sinesBelow=torch.tensor(np.concatenate([[np.sin(tht),0] for tht in thetas]),device=DEVICE)
-            sinesAbove=torch.tensor(np.concatenate([[-np.sin(tht),0] for tht in thetas]),device=DEVICE)
+        #print('new way\n')
+        #import pdb; pdb.set_trace()
+        def ropeMat(m,d,rMatDict):
+            #thetas=[m*np.pow(theta,-2*(i-1)/float(d)) for i in range(1,int(d/2 + 1))]
+            #print('started')
+            mInt=int(m)
+            #import pdb; pdb.set_trace()
+            if ( (mInt,d) in rMatDict):
+                #print('yes here')
+                #import pdb; pdb.set_trace()
+                return rMatDict[(mInt,d)]
+            #raise Exception('no way')
+            oneOverD=1./float(d)
+            dLim=int(d/2 + 1)
+            thetas=torch.tensor([m*torch.pow(theta,torch.tensor([-2*(i-1)*oneOverD ],device=DEVICE)  ) for i in range(1,dLim ) ],device=DEVICE)
+
+            #thetas=torch.tensor([m*torch.pow(theta,-2*(i-1)*oneOverD ) for i in range(1,dLim ) ],device=DEVICE)
+            cosThetas=torch.cos(thetas)
+            sinThetas=torch.sin(thetas) 
+            zeros=torch.zeros(len(thetas),device=DEVICE)
+            cosines=torch.flatten(torch.tensor([z for z in zip(cosThetas,cosThetas)],device=DEVICE  ))
+            sinesBelow=torch.flatten(torch.tensor([z for z in zip(sinThetas,zeros   )],device=DEVICE  )  )
+            sinesAbove=torch.flatten(torch.tensor([z for z in zip(-sinThetas,zeros )],device=DEVICE  ))
+            #cosines=torch.tensor(np.concatenate([[np.cos(tht),np.cos(tht)] for tht in thetas]),device=DEVICE)
+            #sinesBelow=torch.tensor(np.concatenate([[np.sin(tht),0] for tht in thetas]),device=DEVICE)
+            #sinesAbove=torch.tensor(np.concatenate([[-np.sin(tht),0] for tht in thetas]),device=DEVICE)
             rMat=torch.zeros(d,d,device=DEVICE)
-            rMat=rMat.diagonal_scatter(cosines)
+            rMat=rMat.diagonal_scatter(cosines) 
             rMat=rMat.diagonal_scatter(sinesBelow[0:-1],1)
             rMat=rMat.diagonal_scatter(sinesAbove[0:-1],-1)
-            return rMat
+            rMatDict[(mInt,d)]=rMat
+            #print('done')
+            #import pdb; pdb.set_trace()
+            return rMat 
 
         seqLength=token_positions.shape[-1]
     
@@ -337,11 +370,11 @@ class LLModel(torch.nn.Module):
             else:
                 #print('here')
                 #import pdb; pdb.set_trace()
-                res[:,i,:]=in_query_or_key[:,i,:]@ropeMat(token_positions[i],d_k)
+                res[:,i,:]=in_query_or_key[:,i,:]@ropeMat(token_positions[i],d_k,rMatDict)
 
-        return res 
+        return res  
 
-        seqLen=in_features.shape[1]
+        #seqLen=in_features.shape[1]
 
 
     def run_transformer_block(
@@ -352,10 +385,11 @@ class LLModel(torch.nn.Module):
             theta: float,
             weights: dict[str, Tensor],
             in_features: Float[Tensor, " batch sequence_length d_model"],
+            rMatDict=dict()
     ) -> Float[Tensor, " batch sequence_length d_model"]:
 
         seqLen=in_features.shape[1]
-        tokenPos=torch.Tensor([[i for i in range(0,seqLen )]])
+        tokenPos=torch.Tensor([[i for i in range(0,seqLen )]])#,device=DEVICE)
         tokenPos.to(DEVICE)
 
         eps=5e-6
@@ -369,7 +403,7 @@ class LLModel(torch.nn.Module):
                                                                weights['attn_v_proj_weight'],
                                                                weights['attn_output_proj_weight'],
                                                                rmsNormOut,#in_features,                                                 
-                                                               tokenPos)
+                                                               tokenPos,rMatDict=rMatDict)
 
 
         rmsNormOut2=LLModel.run_rmsnorm(d_model,eps,weights['ln2_weight'],
@@ -395,7 +429,7 @@ class LLModel(torch.nn.Module):
                                   self.d_ff,
                                   self.rope_theta,
                                   self.weightDct,
-                                  in_indices)
+                                          in_indices,self.rMatDict)
     
     def run_transformer_lm(
             vocab_size: int,
@@ -407,6 +441,7 @@ class LLModel(torch.nn.Module):
             rope_theta: float,
             weights: dict[str, Tensor],
             in_indices: Int[Tensor, " batch_size sequence_length"],
+            rMatDict=dict()
     ) -> Float[Tensor, " batch_size sequence_length vocab_size"]:
         layerOutput=LLModel.run_embedding(vocab_size,d_model,weights['token_embeddings_weight'],
                                           in_indices)
@@ -434,7 +469,7 @@ class LLModel(torch.nn.Module):
                                                       context_length,#???                                                               
                                                       rope_theta,
                                                       weightDct,
-                                                      layerOutput)#????                                                                      
+                                                      layerOutput,rMatDict=rMatDict)#????                                                                      
 
 
         #import pdb; pdb.set_trace()
