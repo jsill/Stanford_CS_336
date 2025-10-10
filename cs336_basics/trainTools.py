@@ -7,6 +7,11 @@ from collections.abc import Iterable
 from jaxtyping import Float, Int
 import numpy.typing as npt
 
+if (torch.cuda.is_available()):
+   DEVICE='cuda'#'cuda'
+else:
+   DEVICE='cpu'
+   
 def save_checkpoint(model: torch.nn.Module,
                     optimizer: torch.optim.Optimizer,
                     iteration: int,
@@ -74,11 +79,10 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     softm=run_softmax(inputs,1)
 
 
-    
-    
+
     if (len(targets.shape)==1):
        vocabSize=softm.shape[1]
-       takeMat=torch.zeros(targets.shape,dtype=torch.int64)
+       takeMat=torch.zeros(targets.shape,dtype=torch.int64,device=DEVICE)
        for i in range(targets.shape[0]):
           takeMat[i]=i*vocabSize + targets[i]
        #softMaxMat=torch.take(softm,takeMat)
@@ -93,7 +97,7 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
        vocabSize=softm.shape[2]
        dim0=targets.shape[0]
        dim1=targets.shape[1] 
-       takeMat=torch.zeros(targets.shape,dtype=torch.int64)
+       takeMat=torch.zeros(targets.shape,dtype=torch.int64,device=DEVICE)
        for i in range(dim0):
           for j in range(dim1):
              #print('about to set take val\n')
@@ -116,7 +120,7 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     #print('yeah baby \n\n')
     #import pdb; pdb.set_trace()
     return -softMaxMat.mean()
-  
+   
     #import pdb; pdb.set_trace()
     #return -torch.Tensor([safeLog(softMaxMat).mean()])
     #return -torch.Tensor([np.mean([safeLog(softMaxMat[i]) for i in range(softMaxMat.shape[0])])])
