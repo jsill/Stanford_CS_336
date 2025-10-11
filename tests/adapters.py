@@ -27,6 +27,11 @@ from multiprocessing import Process
 
 from cs336_basics import tokenizer,llModel,trainTools
 
+if (torch.cuda.is_available()):
+    DEVICE='cpu'#'cuda'
+else:
+    DEVICE='cpu'
+
 def run_linear(
     d_in: int,
     d_out: int,
@@ -179,6 +184,8 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
+
+    
     return llModel.LLModel.run_multihead_self_attention(d_model,num_heads,
                                                          q_proj_weight,k_proj_weight,
                                                          v_proj_weight,o_proj_weight,in_features)
@@ -201,6 +208,14 @@ def run_multihead_self_attention_with_rope(
 ) -> Float[Tensor, " ... sequence_length d_out"]:
 
 
+    theModel=llModel.LLModel(vocab_size=10000,
+                             context_length=token_positions.shape[-1],
+                             d_model=d_model,
+                             num_layers=1,
+                             num_heads=num_heads,
+                             d_ff=256,
+                             rope_theta=theta)
+    
     return llModel.LLModel.run_multihead_self_attention_with_rope(d_model,
                                                                   num_heads,
                                                                   max_seq_len,
@@ -210,7 +225,7 @@ def run_multihead_self_attention_with_rope(
                                                                   v_proj_weight,
                                                                   o_proj_weight,
                                                                   in_features,
-                                                                  token_positions)
+                                                                  token_positions,theModel.mask)
     """
     Given the key, query, and value projection weights of a naive unbatched
     implementation of multi-head attention, return the output of an optimized batched
@@ -259,8 +274,12 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
+
+
+
     
-    return llModel.LLModel.run_rope(d_k,theta,max_seq_len,in_query_or_key,token_positions)
+    return llModel.LLModel.run_rope(d_k,theta,max_seq_len,in_query_or_key.detach().to(DEVICE),
+                                    token_positions.detach().to(DEVICE))
 
 
  
@@ -337,16 +356,26 @@ def run_transformer_block(
 
     kys=[ky for ky in weights]
     for ky in kys:
-        weights[ky.replace('.','_')]=weights[ky]
+        newKey=ky.replace('.','_')
+        weights[newKey]=weights[ky].clone().detach().to(DEVICE)
+        #weights[newKey].to(DEVICE)
         weights.pop(ky)
-        
+
+    theModel=llModel.LLModel(vocab_size=10000,
+                             context_length=in_features.shape[-2],
+                             d_model=d_model,
+                             num_layers=4,
+                             num_heads=num_heads,
+                             d_ff=d_ff,
+                             rope_theta=theta)
+    
     return llModel.LLModel.run_transformer_block(d_model,
                                                  num_heads,
                                                  d_ff,
                                                  max_seq_len,
                                                  theta,
                                                  weights,
-                                                 in_features)
+                                                 in_features,theModel.mask)
 
     
  
@@ -444,9 +473,9 @@ def run_transformer_lm(
     
     print('constructed lm now\n')
     #import pdb; pdb.set_trace()
-    
+     
     theModel=llModel.LLModel(vocab_size,
-                             context_length,
+                             in_indices.shape[-1],
                              d_model,
                              num_layers,
                              num_heads,
@@ -480,7 +509,8 @@ def run_rmsnorm(
         RMSNorm of the `in_features`.
     """
 
-    return llModel.LLModel.run_rmsnorm(d_model,eps,weights,in_features)
+    return llModel.LLModel.run_rmsnorm(d_model,eps,weights.clone().detach().to(DEVICE),
+                                       in_features)
     #a=in_features
     #aSq=a.square()
     #dim=a.dim() 
