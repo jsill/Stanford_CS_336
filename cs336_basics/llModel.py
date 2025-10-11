@@ -30,6 +30,12 @@ class LLModel(torch.nn.Module):
         print('DEVICE is ...............',DEVICE)
         self.vocab_size=vocab_size
         self.context_length=context_length
+        
+        self.mask=torch.zeros(context_length,context_length,device=DEVICE)
+             
+        for i in range(context_length):
+            for j in range(context_length):
+                self.mask[i][j]=i >= j
         self.d_model=d_model
         self.num_layers=num_layers
         self.num_heads=num_heads
@@ -246,6 +252,7 @@ class LLModel(torch.nn.Module):
             o_proj_weight: Float[Tensor, " d_model d_v"],
             in_features: Float[Tensor, " ... sequence_length d_in"],
             token_positions: Int[Tensor, " ... sequence_length"] | None = None,
+            mask: Int[Tensor, " sequence_length sequense_length"] | None=None,
             rMatDict=dict()
 )-> Float[Tensor, " ... sequence_length d_out"]:
 
@@ -263,16 +270,19 @@ class LLModel(torch.nn.Module):
 
          headList=[]
          
-         seqLen=in_features.shape[-2]
+         #seqLen=in_features.shape[-2]
 
          seqLen=len(token_positions[0])
 
-
-         mask=torch.zeros(seqLen,seqLen,device=DEVICE)
+         if (seqLen != mask.shape[0]):
+             import pdb; pdb.set_trace()
+             raise Exception('seq len mismatch')
+         
+         #mask=torch.zeros(seqLen,seqLen,device=DEVICE)
          #mask.to(DEVICE)
-         for i in range(seqLen):
-             for j in range(seqLen):
-                 mask[i][j]=i >= j
+         #for i in range(seqLen):
+         #    for j in range(seqLen):
+         #        mask[i][j]=i >= j
                  
          for h in range(num_heads):
              startIdx=h*d_k
@@ -385,6 +395,7 @@ class LLModel(torch.nn.Module):
             theta: float,
             weights: dict[str, Tensor],
             in_features: Float[Tensor, " batch sequence_length d_model"],
+            mask,
             rMatDict=dict()
     ) -> Float[Tensor, " batch sequence_length d_model"]:
 
@@ -403,7 +414,9 @@ class LLModel(torch.nn.Module):
                                                                weights['attn_v_proj_weight'],
                                                                weights['attn_output_proj_weight'],
                                                                rmsNormOut,#in_features,                                                 
-                                                               tokenPos,rMatDict=rMatDict)
+                                                               tokenPos,
+                                                               mask,
+                                                               rMatDict=rMatDict)
 
 
         rmsNormOut2=LLModel.run_rmsnorm(d_model,eps,weights['ln2_weight'],
@@ -429,8 +442,10 @@ class LLModel(torch.nn.Module):
                                   self.d_ff,
                                   self.rope_theta,
                                   self.weightDct,
-                                          in_indices,self.rMatDict)
-    
+                                          in_indices,
+                                          self.mask,
+                                          self.rMatDict)
+     
     def run_transformer_lm(
             vocab_size: int,
             context_length: int,
@@ -441,6 +456,7 @@ class LLModel(torch.nn.Module):
             rope_theta: float,
             weights: dict[str, Tensor],
             in_indices: Int[Tensor, " batch_size sequence_length"],
+            mask,
             rMatDict=dict()
     ) -> Float[Tensor, " batch_size sequence_length vocab_size"]:
         layerOutput=LLModel.run_embedding(vocab_size,d_model,weights['token_embeddings_weight'],
@@ -469,9 +485,11 @@ class LLModel(torch.nn.Module):
                                                       context_length,#???                                                               
                                                       rope_theta,
                                                       weightDct,
-                                                      layerOutput,rMatDict=rMatDict)#????                                                                      
+                                                      layerOutput,
+                                                      mask,
+                                                      rMatDict=rMatDict)#????                                                                      
 
-
+            #gc.collect()
         #import pdb; pdb.set_trace()
         eps=5e-6
         normed=LLModel.run_rmsnorm(d_model,eps,weights['ln_final_weight'],layerOutput)
