@@ -8,7 +8,8 @@ from jaxtyping import Float, Int
 import numpy.typing as npt
 
 if (torch.cuda.is_available()):
-   DEVICE='cuda'#'cuda'
+   DEVICE='cuda'
+   #DEVICE='cpu'
 else:
    DEVICE='cpu'
    
@@ -79,7 +80,7 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     softm=run_softmax(inputs,1)
 
 
-
+    
     if (len(targets.shape)==1):
        vocabSize=softm.shape[1]
        takeMat=torch.zeros(targets.shape,dtype=torch.int64,device=DEVICE)
@@ -98,11 +99,14 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
        dim0=targets.shape[0]
        dim1=targets.shape[1] 
        takeMat=torch.zeros(targets.shape,dtype=torch.int64,device=DEVICE)
+       rngDim1=torch.arange(dim1,device=DEVICE)
        for i in range(dim0):
-          for j in range(dim1):
+          takeMat[i]=i*dim1 + rngDim1
+       takeMat=vocabSize*takeMat + targets
+          #for j in range(dim1):
              #print('about to set take val\n')
              #import pdb; pdb.set_trace()
-             takeMat[i][j]=(i*dim1 +j)*vocabSize + targets[i][j]
+          #   takeMat[i][j]=(i*dim1 +j)*vocabSize + targets[i][j]
   
        #softMaxMat=torch.zeros(targets.shape,requires_grad=True)
        #for i in range(targets.shape[0]):
