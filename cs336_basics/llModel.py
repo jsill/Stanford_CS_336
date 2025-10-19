@@ -8,12 +8,13 @@ from jaxtyping import Float, Int
 import torch
 from torch import nn
 import numpy as np
- 
+  
 if (torch.cuda.is_available()):
     DEVICE='cuda'
+    #DEVICE='cpu'
 else:
     DEVICE='cpu'
-
+ 
 class LLModel(torch.nn.Module):
 
     def __init__(self,
@@ -256,7 +257,7 @@ class LLModel(torch.nn.Module):
             rMatDict=dict()
 )-> Float[Tensor, " ... sequence_length d_out"]:
 
-         print('in features shape here',in_features.shape)
+         #print('in features shape here',in_features.shape)
 
          d_k=int(d_model/num_heads)
 
@@ -275,7 +276,7 @@ class LLModel(torch.nn.Module):
          seqLen=len(token_positions[0])
 
          if (seqLen != mask.shape[0]):
-             import pdb; pdb.set_trace()
+             #import pdb; pdb.set_trace()
              raise Exception('seq len mismatch')
          
          #mask=torch.zeros(seqLen,seqLen,device=DEVICE)
@@ -371,19 +372,41 @@ class LLModel(torch.nn.Module):
     
         #res=torch.zeros(in_query_or_key.shape[0],in_query_or_key.shape[1],in_query_or_key.shape[2])
 
-        res=torch.zeros(in_query_or_key.shape[0],seqLength,in_query_or_key.shape[2],device=DEVICE)
+        #resMat=torch.zeros(in_query_or_key.shape[0],seqLength,in_query_or_key.shape[2],device=DEVICE)
 
-    
-        for i in range(seqLength):
-            if (i >= in_query_or_key.shape[1]):
-                res[:,i,:]=0.
-            else:
-                #print('here')
-                #import pdb; pdb.set_trace()
-                res[:,i,:]=in_query_or_key[:,i,:]@ropeMat(token_positions[i],d_k,rMatDict)
 
-        return res  
 
+        #def applyRopeOld(res):
+        #    for i in range(seqLength):
+        #        if (i >= in_query_or_key.shape[1]):
+        #            res[:,i,:]=0.
+        #        else:
+        #            res[:,i,:]=in_query_or_key[:,i,:]@ropeMat(token_positions[i],d_k,rMatDict)
+
+        #    return res
+
+        #iqkTranspose=torch.transpose(in_query_or_key,1,2)
+
+        iqkTranspose=torch.transpose(in_query_or_key,0,1)
+        
+        #import pdb; pdb.set_trace()
+        #def applyRopeYounger():
+        #    ropeMatsStacked=torch.stack([ropeMat(token_positions[i],d_k,rMatDict) for i in range(seqLength)])
+        #    dot=torch.stack([iqkTranspose[:,:,i]@ropeMatsStacked[i] for i in range(seqLength)])
+            #import pdb; pdb.set_trace()
+        #    return dot.transpose(0,1)
+
+        def applyRope():
+            dot=torch.stack([iqkTranspose[i]@ropeMat(token_positions[i],d_k,rMatDict) for i in range(seqLength)])
+
+            #import pdb; pdb.set_trace()
+            #rTranspose=ropeMatsStacked.transpose(0,2).transpose(0,1)
+            #dot=iqkOtherTranspose@rTranspose
+            return dot.transpose(0,1)
+        
+            #import pdb; pdb.set_trace()
+        return applyRope()#resMat)
+       
         #seqLen=in_features.shape[1]
 
 
