@@ -10,8 +10,8 @@ from torch import nn
 import numpy as np
   
 if (torch.cuda.is_available()):
-    DEVICE='cuda'
-    #DEVICE='cpu'
+    #DEVICE='cuda'
+    DEVICE='cpu'
 else:
     DEVICE='cpu'
  
@@ -335,41 +335,50 @@ class LLModel(torch.nn.Module):
 
         #print('new way\n')
         #import pdb; pdb.set_trace()
-        def ropeMat(m,d,rMatDict):
+        def ropeMat(seqLen,d,rMatDict):
             #thetas=[m*np.pow(theta,-2*(i-1)/float(d)) for i in range(1,int(d/2 + 1))]
             #print('started')
-            mInt=int(m)
+            #mInt=int(m)
             #import pdb; pdb.set_trace()
-            if ( (mInt,d) in rMatDict):
+            if ( (seqLen,d) in rMatDict):
                 #print('yes here')
                 #import pdb; pdb.set_trace()
-                return rMatDict[(mInt,d)]
+                return rMatDict[(seqLen,d)]
             #raise Exception('no way')
             oneOverD=1./float(d)
             dLim=int(d/2 + 1)
-            thetas=torch.tensor([m*torch.pow(theta,torch.tensor([-2*(i-1)*oneOverD ],device=DEVICE)  ) for i in range(1,dLim ) ],device=DEVICE)
+            #for m in range(seqLen):
+            def makeForM(m):
+                thetas=torch.tensor([m*torch.pow(theta,torch.tensor([-2*(i-1)*oneOverD ],device=DEVICE)  ) for i in range(1,dLim ) ] ,
+                                device=DEVICE)
 
-            #thetas=torch.tensor([m*torch.pow(theta,-2*(i-1)*oneOverD ) for i in range(1,dLim ) ],device=DEVICE)
-            cosThetas=torch.cos(thetas)
-            sinThetas=torch.sin(thetas) 
-            zeros=torch.zeros(len(thetas),device=DEVICE)
-            cosines=torch.flatten(torch.tensor([z for z in zip(cosThetas,cosThetas)],device=DEVICE  ))
-            sinesBelow=torch.flatten(torch.tensor([z for z in zip(sinThetas,zeros   )],device=DEVICE  )  )
-            sinesAbove=torch.flatten(torch.tensor([z for z in zip(-sinThetas,zeros )],device=DEVICE  ))
-            #cosines=torch.tensor(np.concatenate([[np.cos(tht),np.cos(tht)] for tht in thetas]),device=DEVICE)
-            #sinesBelow=torch.tensor(np.concatenate([[np.sin(tht),0] for tht in thetas]),device=DEVICE)
-            #sinesAbove=torch.tensor(np.concatenate([[-np.sin(tht),0] for tht in thetas]),device=DEVICE)
-            rMat=torch.zeros(d,d,device=DEVICE)
-            rMat=rMat.diagonal_scatter(cosines) 
-            rMat=rMat.diagonal_scatter(sinesBelow[0:-1],1)
-            rMat=rMat.diagonal_scatter(sinesAbove[0:-1],-1)
-            rMatDict[(mInt,d)]=rMat
+            
+            
+                cosThetas=torch.cos(thetas)
+                sinThetas=torch.sin(thetas)  
+                zeros=torch.zeros(thetas.shape,device=DEVICE)
+                cosines=torch.flatten(torch.tensor([z for z in zip(cosThetas,cosThetas)],device=DEVICE  ))
+                sinesBelow=torch.flatten(torch.tensor([z for z in zip(sinThetas,zeros   )],device=DEVICE  )  )
+                sinesAbove=torch.flatten(torch.tensor([z for z in zip(-sinThetas,zeros )],device=DEVICE  ))
+            
+             
+            
+                rMat=torch.zeros(d,d,device=DEVICE)
+                rMat=rMat.diagonal_scatter(cosines) 
+                rMat=rMat.diagonal_scatter(sinesBelow[0:-1],1)
+                rMat=rMat.diagonal_scatter(sinesAbove[0:-1],-1)
+                return rMat
+            rMatOverall=torch.stack([makeForM(m) for m in range(seqLen)])
+            rMatDict[(seqLen,d)]=rMatOverall
             #print('done')
             #import pdb; pdb.set_trace()
-            return rMat 
+            return rMatOverall 
 
         seqLength=token_positions.shape[-1]
-    
+
+        rMat=ropeMat(seqLength,d_k,rMatDict)
+        #print('hold on loosely\n')
+        #import pdb; pdb.set_trace()
         #res=torch.zeros(in_query_or_key.shape[0],in_query_or_key.shape[1],in_query_or_key.shape[2])
 
         #resMat=torch.zeros(in_query_or_key.shape[0],seqLength,in_query_or_key.shape[2],device=DEVICE)
@@ -388,7 +397,9 @@ class LLModel(torch.nn.Module):
         #iqkTranspose=torch.transpose(in_query_or_key,1,2)
 
         iqkTranspose=torch.transpose(in_query_or_key,0,1)
-        
+
+        #foo=ropeMat(len(token_positions),d_k,rMatDict)
+        #print('i am here\n')
         #import pdb; pdb.set_trace()
         #def applyRopeYounger():
         #    ropeMatsStacked=torch.stack([ropeMat(token_positions[i],d_k,rMatDict) for i in range(seqLength)])
@@ -397,7 +408,8 @@ class LLModel(torch.nn.Module):
         #    return dot.transpose(0,1)
 
         def applyRope():
-            dot=torch.stack([iqkTranspose[i]@ropeMat(token_positions[i],d_k,rMatDict) for i in range(seqLength)])
+            dot=torch.einsum('ijk,ikl->ijl',iqkTranspose,rMat)
+            #dot=torch.stack([iqkTranspose[i]@ropeMat(token_positions[i],d_k,rMatDict) for i in range(seqLength)])
 
             #import pdb; pdb.set_trace()
             #rTranspose=ropeMatsStacked.transpose(0,2).transpose(0,1)
