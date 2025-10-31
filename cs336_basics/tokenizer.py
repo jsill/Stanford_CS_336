@@ -316,7 +316,7 @@ class Tokenizer:
             if (nonSpecialEnd > nonSpecialStart):
                 chunkText=textString[nonSpecialStart:nonSpecialEnd]
 
-                encoding=encoding + doByLine(chunkText)
+                encoding=encoding + encodeNonSpecial(chunkText)#doByLine(chunkText)
 
             if (rnge[0] < len(textString)):
                 encoding.append(findWhichSpecialToken(textString[rnge[0]:rnge[1]]))
