@@ -6,6 +6,7 @@ import numpy as np
 from collections.abc import Iterable
 from jaxtyping import Float, Int
 import numpy.typing as npt
+import gc
 
 if (torch.cuda.is_available()):
    DEVICE='cuda'
@@ -56,11 +57,16 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
 
+    #print('better way\n\n')
+    #import pdb; pdb.set_trace()
     maxes=torch.max(in_features,dim)[0]
-    in_features=torch.transpose(torch.transpose(in_features,0,dim)-maxes,dim,0)
-    in_features_exp=torch.exp(in_features)
+
+    inMinusMax=in_features-maxes.unsqueeze(-1)
+    #in_features=torch.transpose(torch.transpose(in_features,0,dim)-maxes,dim,0)
+    in_features_exp=torch.exp(inMinusMax)
     sm=torch.sum(in_features_exp,dim)
-    return torch.transpose(torch.div(torch.transpose(in_features_exp,0,dim),sm),dim,0)
+    return torch.div(in_features_exp,sm.unsqueeze(-1)) 
+    #return torch.transpose(torch.div(torch.transpose(in_features_exp,0,dim),sm),dim,0)
 
 def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]) -> Float[Tensor, ""]:
     """Given a tensor of inputs and targets, compute the average cross-entropy                                                                               
@@ -77,8 +83,11 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     """
     batchSize=inputs.shape[0]
 
-    softm=run_softmax(inputs,1)
+    #softm=run_softmax(inputs,1)
 
+    #print('minus 1 time!\n\n')
+    #import pdb; pdb.set_trace()
+    softm=run_softmax(inputs,-1)
 
     
     if (len(targets.shape)==1):
@@ -123,8 +132,12 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     softMaxMat=torch.log(softMaxMat)
     #print('yeah baby \n\n')
     #import pdb; pdb.set_trace()
-    return -softMaxMat.mean()
-   
+    ret= -softMaxMat.mean()
+
+    del softm
+    del softMaxMat
+    gc.collect()
+    return ret
     #import pdb; pdb.set_trace()
     #return -torch.Tensor([safeLog(softMaxMat).mean()])
     #return -torch.Tensor([np.mean([safeLog(softMaxMat[i]) for i in range(softMaxMat.shape[0])])])
