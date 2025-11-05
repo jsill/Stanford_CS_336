@@ -9,9 +9,10 @@ import torch
 from torch import nn
 import numpy as np
   
-if (torch.cuda.is_available()):
-    #DEVICE='cuda'
-    DEVICE='cpu'
+if torch.cuda.is_available():
+    DEVICE='cuda'
+    #
+    #DEVICE='cpu'
 else:
     DEVICE='cpu'
  
@@ -134,11 +135,13 @@ class LLModel(torch.nn.Module):
             in_features: Float[Tensor, " ... d_model"],
     ) -> Float[Tensor, " ... d_model"]:
         sigm=torch.nn.Sigmoid()
-        xw=in_features@torch.transpose(w1_weight,0,1)
+        xw=torch.einsum('ijk,lk->ijl',in_features,w1_weight)#in_features@torch.transpose(w1_weight,0,1)
+
+        #import pdb; pdb.set_trace()
         swish=torch.multiply(xw,sigm(xw))
-        xv=in_features@torch.transpose(w3_weight,0,1)
+        xv=torch.einsum('ijk,lk->ijl',in_features,w3_weight)#in_features@torch.transpose(w3_weight,0,1)
         swishTimesXV=torch.multiply(swish,xv)
-        return swishTimesXV@torch.transpose(w2_weight,0,1)
+        return torch.einsum('ijk,lk->ijl',swishTimesXV,w2_weight)#swishTimesXV@torch.transpose(w2_weight,0,1)
 
     
     def run_rmsnorm(d_model: int,
@@ -146,23 +149,34 @@ class LLModel(torch.nn.Module):
                     weights: Float[Tensor, " d_model"],
                     in_features: Float[Tensor, " ... d_model"],
                     ) -> Float[Tensor, " ... d_model"]:
-            a=in_features
-            aSq=a.square()
-            dim=a.dim()
+
+            
+            #a=in_features
+            aSq=in_features.square()
+            dim=in_features.dim()
             aSqMean=torch.mean(aSq,dim-1)#,tuple(range(0,dim-1)))                                                                                        
             aRMS=aSqMean.sqrt()+ eps
-
-            #REVISIT...there is surely a better way than all this transposing                                                                             
-            a=a.transpose(0,2)
-            a=a.transpose(1,2)
-            aDiv=a.div(aRMS)
-            aDiv=aDiv.transpose(1,2)
-            aDiv=aDiv.transpose(0,2)
             
-            res=aDiv*weights
+            #REVISIT...there is surely a better way than all this transposing                                                                             
 
-            return res
-        
+            #a=a.transpose(0,2)
+            #a=a.transpose(1,2)
+            #aDiv=a.div(aRMS)
+            #aDiv=aDiv.transpose(1,2)
+            #aDiv=aDiv.transpose(0,2)
+
+            #print('all new')
+            #import pdb; pdb.set_trace()
+
+
+            aDiv=in_features.div(aRMS.unsqueeze(2))
+
+            #import pdb; pdb.set_trace()
+            return aDiv*weights
+
+            #import pdb; pdb.set_trace()
+            #return torch.einsum('ij,jk->ik',aDiv,weights)
+         
     def run_scaled_dot_product_attention(
             Q: Float[Tensor, " ... queries d_k"],
             K: Float[Tensor, " ... keys d_k"],
@@ -262,9 +276,19 @@ class LLModel(torch.nn.Module):
          d_k=int(d_model/num_heads)
 
 
-         q_proj=in_features@torch.transpose(q_proj_weight,0,1)
-         k_proj=in_features@torch.transpose(k_proj_weight,0,1)
-         v_proj=in_features@torch.transpose(v_proj_weight,0,1)
+         #print('new way')
+         #import pdb; pdb.set_trace()
+
+         useEinsum=True
+
+         if (useEinsum):
+             q_proj=torch.einsum("ijk,lk->ijl",in_features,q_proj_weight)
+             k_proj=torch.einsum("ijk,lk->ijl",in_features,k_proj_weight)
+             v_proj=torch.einsum("ijk,lk->ijl",in_features,v_proj_weight)
+         else:
+             q_proj=in_features@torch.transpose(q_proj_weight,0,1)
+             k_proj=in_features@torch.transpose(k_proj_weight,0,1)
+             v_proj=in_features@torch.transpose(v_proj_weight,0,1)
 
          #print('done proj')
          #import pdb; pdb.set_trace()
@@ -526,10 +550,12 @@ class LLModel(torch.nn.Module):
 
             #gc.collect()
         #import pdb; pdb.set_trace()
-        eps=5e-6
+        eps=5e-6 
         normed=LLModel.run_rmsnorm(d_model,eps,weights['ln_final_weight'],layerOutput)
-        finalOut=normed@torch.transpose(weights['lm_head_weight'],0,1)
- 
+    
+        #finalOut=normed@torch.transpose(weights['lm_head_weight'],0,1)
+        finalOut=torch.einsum("ijk,lk->ijl",normed,weights['lm_head_weight'])
+        #import pdb; pdb.set_trace()
         return finalOut
 
     
