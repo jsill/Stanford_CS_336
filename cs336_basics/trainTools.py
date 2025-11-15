@@ -184,12 +184,18 @@ def get_lr_cosine_schedule(
 
 
 class AdamW(torch.optim.Optimizer):
-    def __init__(self,params,lr,weight_decay,betas,eps):
-        super(AdamW,self).__init__(params,dict(lr=lr,weight_decay=weight_decay,betas=betas,eps=eps))
+    def __init__(self,params,lrMax,lrMin,warmup_iters,cosine_cycle_iters,weight_decay,betas,eps):
+        super(AdamW,self).__init__(params,dict(lrMax=lrMax,lrMin=lrMin,
+                                               warmup_iters=warmup_iters,
+                                               cosine_cycle_iters=cosine_cycle_iters,
+                                               weight_decay=weight_decay,betas=betas,eps=eps))
 
     def step(self):
         for group in self.param_groups:
-            lr=group['lr']
+            lrMax=group['lrMax']
+            lrMin=group['lrMin']
+            warmup_iters=group['warmup_iters']
+            cosine_cycle_iters=group['cosine_cycle_iters']
             lambd=group['weight_decay']
             betas=group['betas']
             beta1=betas[0]
@@ -201,7 +207,7 @@ class AdamW(torch.optim.Optimizer):
                 state=self.state[p]
 
                 step_count=state.get('step_count',1)
-
+                #print('step_count',step_count)
                 grad=p.grad.data
 
                 g=grad #+ lambd*p.data                                                                                                           
@@ -226,11 +232,15 @@ class AdamW(torch.optim.Optimizer):
                 state['step_count']=step_count + 1
 
                 eta=1.
-                p.data = p.data - eta*(lr*(momhat/(torch.sqrt(vhat) + eps) + lambd*p.data ))
 
+                lr=get_lr_cosine_schedule(step_count,lrMax,lrMin,
+                                          warmup_iters,cosine_cycle_iters)
+                #print('lr',lr)
+                p.data = p.data - eta*(lr*(momhat/(torch.sqrt(vhat) + eps) + lambd*p.data ))
+ 
 
 
                 
    
-
+ 
    
