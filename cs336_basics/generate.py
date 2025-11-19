@@ -73,7 +73,8 @@ def load(dumpIter):
     return bpeTokenizer,model
 
 def generateStory(inputTextString,bpeTokenizer,model,temperature,
-                  show=None,verbose=False):
+                  show=None,showLoops=None,verbose=False,seed=1234):
+    np.random.seed(seed)
     chooseMax=False
     inputEncoded=np.array(bpeTokenizer.encode(inputTextString))
     #print('encoded')
@@ -125,15 +126,19 @@ def generateStory(inputTextString,bpeTokenizer,model,temperature,
            argsort=np.argsort(-probs)
            for j in range(show):
                print(argsort[j].item(),bpeTokenizer.vocab[argsort[j].item()],"%3.3f"%probs[argsort[j]])
-           if (i > 0):
-               endFound=True
+           if (showLoops != None):
+               if (i > showLoops):
+                   endFound=True
 
+           print('\n')
+            
        if (chooseMax): 
            pred=np.argmax(predictions[0,idx].detach().cpu())
        else: 
            pred=sample(probs.detach().cpu())#np.argmax(predictions[0,-1,:].detach().cpu())
-       if (verbose):
-           print('pred is ',pred)
+       if (verbose or show):
+           print('chosen token: ',bpeTokenizer.vocab[pred.item()])
+           print('\n\n')
        #print(i,pred)
        if (numInputTokens+ i > 255):
            output[0,0:255]=output[0,1:].clone()
